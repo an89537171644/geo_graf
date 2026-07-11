@@ -118,7 +118,6 @@ def build_markdown_report(
     source_test_ids: list[str] | None = None,
     source_row_count: int | None = None,
 ) -> str:
-    settlement_resolution = float(metadata.get("indicator_resolution_mm", 0.01))
     load_resolution = float(metadata.get("load_resolution_kN", 0.01))
     pressure_resolution_values = pandas.to_numeric(
         prepared.get("pressure_resolution_kPa"), errors="coerce"

@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/manual-entry-gui
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    env:
+      PYTHONUTF8: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      MPLBACKEND: Agg
+      MPLCONFIGDIR: ${{ runner.temp }}/soil-stamp-mpl
+      COVERAGE_FILE: ${{ runner.temp }}/soil-stamp-ci/.coverage
+      CI_RESULTS: ${{ runner.temp }}/soil-stamp-ci
+      DEMO_OUT: ${{ runner.temp }}/soil-stamp-ci/demo
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints/ci.txt
+
+      - name: Prepare report directory
+        run: python -c "import os; from pathlib import Path; Path(os.environ['CI_RESULTS']).mkdir(parents=True, exist_ok=True)"
+
+      - name: Install constrained project
+        run: python -m pip install --constraint constraints/ci.txt --editable ".[test]"
+
+      - name: Check installed dependencies
+        run: python -m pip check
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Compile Python 3.10-compatible sources
+        run: python -m compileall -q -f app.py soilstamp tests scripts
+
+      - name: Full pytest (includes Streamlit AppTest and image regression)
+        run: python -m pytest --junitxml="${{ env.CI_RESULTS }}/junit.xml"
+
+      - name: Calculation-core coverage (minimum 80 percent)
+        run: python -m pytest tests/test_analysis.py tests/test_data.py tests/test_indicators.py tests/test_plotting.py tests/test_image_regression.py --cov=soilstamp --cov-report=term-missing --cov-report=xml:"${{ env.CI_RESULTS }}/coverage.xml" --cov-fail-under=80
+
+      - name: Run reproducible CLI demo
+        run: python -m soilstamp.cli examples/demo_protocol.csv examples/demo_metadata.json --out "${{ env.DEMO_OUT }}" --plot-mode antonov_publication --axis p-s --bootstrap 100 --seed 202604
+
+      - name: Verify demo artifacts and ZIP manifest
+        run: python scripts/verify_demo_artifacts.py "${{ env.DEMO_OUT }}"
+
+      - name: Confirm demo did not modify tracked files
+        run: git diff --exit-code HEAD --
+
+      - name: Upload JUnit, coverage, and demo artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-${{ runner.os }}-py${{ matrix.python-version }}
+          path: ${{ env.CI_RESULTS }}
+          if-no-files-found: warn
+          retention-days: 30
+
+  required:
+    name: Required CI
+    if: always()
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every matrix leg
+        env:
+          MATRIX_RESULT: ${{ needs.matrix.result }}
+        run: test "$MATRIX_RESULT" = success
