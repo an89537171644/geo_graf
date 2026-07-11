@@ -1,5 +1,7 @@
 # Soil Stamp Antonov 0.5.0b2.dev1
 
+[![CI](https://github.com/an89537171644/geo_graf/actions/workflows/ci.yml/badge.svg)](https://github.com/an89537171644/geo_graf/actions/workflows/ci.yml)
+
 Локальная программа для воспроизводимой обработки штамповых испытаний армированного и неармированного грунта. Она строит кривые «нагрузка/давление — осадка» в ориентации В. М. Антонова, сохраняет исходную последовательность протокола, рассчитывает `pcr`, условный штамповый модуль, групповые доверительные интервалы и сравнительные показатели. Версия `0.5.0b2.dev1` добавляет ручной ввод первичных данных поверх того же проверенного pipeline и не меняет научную логику графиков Антонова или модель разрушения.
 
 ## Быстрый запуск в Windows
@@ -232,11 +234,18 @@ soil-stamp protocol.xlsx metadata.json --import-mode interactive `
 ## Тесты
 
 ```powershell
-./.venv/Scripts/python -m pip install -e ".[test]"
+./.venv/Scripts/python -m pip install -c constraints/ci.txt -e ".[test]"
+./.venv/Scripts/python -m ruff check .
+./.venv/Scripts/python -m compileall -q app.py soilstamp tests scripts
 ./.venv/Scripts/python -m pytest
+./.venv/Scripts/python -m pytest tests/test_analysis.py tests/test_data.py tests/test_indicators.py tests/test_plotting.py tests/test_image_regression.py --cov=soilstamp --cov-report=term-missing --cov-fail-under=80
 ```
 
 Image-regression эталон находится в `tests/baseline` и фиксирует ориентацию, сетку, рамку, маркеры и ломаные Antonov-графика.
+
+GitHub Actions выполняет эти проверки на Windows и Ubuntu с Python 3.10, 3.11 и 3.12. Полный pytest включает Streamlit AppTest. Затем CI запускает пакетную демонстрацию, проверяет CSV/JSON/SVG/PDF/PNG и `reproducibility.zip`, публикует JUnit XML, coverage XML и демонстрационные результаты. Единый обязательный статус для правил ветки — `Required CI`.
+
+`constraints/ci.txt` фиксирует единый набор прямых runtime/test-зависимостей, совместимый со всей матрицей Python 3.10–3.12. Платформенные транзитивные зависимости по-прежнему разрешает `pip`; отдельные полностью замороженные lock-файлы для каждой ОС и версии Python следует формировать перед выпуском установочного дистрибутива.
 
 ## Границы 0.5.0b2.dev1 / TASK 12
 
@@ -248,7 +257,7 @@ Image-regression эталон находится в `tests/baseline` и фикс
 - сводные скаляры `k_F`, `k_E`, `k_pcr` с ДИ, отношения `pu/pcr`, `su/scr` и модуль разгрузки не формируются автоматически: для них нужны подтверждённые `pu`, `su`, `scr`, направление отношения и единая проектная методика;
 - functional/mixed models, DOE, ANOVA/ANCOVA и поверхности отклика не запускаются автоматически: необходимы явно заданные факторы, блоки, структура парности и план эксперимента.
 - нелинейная `custom_calibration` не угадывается: для неё потребуется отдельный версионированный контракт функции/таблицы; линейные возрастающие/убывающие и wrapped-шкалы уже поддержаны;
-- HTML/XLSX-отчёт, полный проектный мастер, Windows EXE/CI и расширенные циклические расчёты остаются последующими gated-итерациями.
+- HTML/XLSX-отчёт, полный проектный мастер, Windows EXE и расширенные циклические расчёты остаются последующими gated-итерациями; базовый CI для чистых Windows/Linux runner'ов добавлен отдельно.
 - JSON ручного черновика является временным переносимым форматом TASK 12; SQLite-архив, утверждение, ревизии, поиск, backup/restore и миграции относятся к TASK 13–15 и здесь не имитируются;
 - старые CSV/XLSX и metadata не требуют миграции и продолжают обрабатываться прежним pipeline; при откате на `0.4.1a2` новый JSON следует сохранить до возврата на ветку ручного ввода, поскольку старый GUI его не открывает.
 
