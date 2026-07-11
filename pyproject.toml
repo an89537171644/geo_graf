@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "soil-stamp-antonov"
-version = "0.4.1a2"
+version = "0.5.0b2.dev1"
 description = "Scientific processing and Antonov-style plotting of plate-load tests"
 readme = "README.md"
 requires-python = ">=3.10"

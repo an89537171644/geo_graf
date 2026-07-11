@@ -10,10 +10,10 @@ if (-not (Test-Path -LiteralPath ".venv\Scripts\python.exe")) {
 if ($LASTEXITCODE -ne 0) {
     throw "Окружение .venv создано старой версией Python. Удалите .venv и запустите снова."
 }
-if (-not (Test-Path -LiteralPath ".venv\.installed-0.4.1a2-indicators")) {
+if (-not (Test-Path -LiteralPath ".venv\.installed-0.5.0b2.dev1-manual")) {
     & ".venv\Scripts\python.exe" -m pip install -e .
     if ($LASTEXITCODE -ne 0) { throw "Не удалось установить зависимости." }
-    New-Item -ItemType File -Path ".venv\.installed-0.4.1a2-indicators" -Force | Out-Null
+    New-Item -ItemType File -Path ".venv\.installed-0.5.0b2.dev1-manual" -Force | Out-Null
 }
 & ".venv\Scripts\python.exe" -m streamlit run app.py
 if ($LASTEXITCODE -ne 0) { throw "Streamlit завершился с ошибкой." }

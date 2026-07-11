@@ -558,7 +558,7 @@ def _branch_series(part: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
     if "branch" not in part:
         return suggested, pd.Series("load_direction_suggested", index=part.index)
     supplied = part["branch"].astype("string").str.strip().str.casefold()
-    valid = supplied.isin(("loading", "hold", "unloading", "reloading"))
+    valid = supplied.isin(("loading", "hold", "unloading", "reloading", "cyclic"))
     return supplied.where(valid, suggested), pd.Series(
         np.where(valid, "protocol", "load_direction_suggested"), index=part.index
     )
@@ -604,6 +604,7 @@ def _append_event(
             "algorithm_version": INDICATOR_ALGORITHM_VERSION,
             "test_id": test_id,
             "channel": channel,
+            "manual_row_uuid": None,
             "row_index": row_index,
             "sequence_index": sequence_index,
             "event_type": event_type,
@@ -663,6 +664,7 @@ def _audit_base(
         "channel": channel,
         "sheet_name": row.get("sheet_name"),
         "source_row": row.get("source_row", index),
+        "manual_row_uuid": row.get("manual_row_uuid"),
         "row_index": int(index),
         "sequence_index": sequence_number,
         "branch": branch,
@@ -1273,6 +1275,14 @@ def _process_channel(
             audit["processing_status"] = "warning"
         audit["correction_record_ids"] = ";".join(dict.fromkeys(record_ids))
         rows.append(audit)
+    if "manual_row_uuid" in part:
+        for event in events:
+            row_index = event.get("row_index")
+            event["manual_row_uuid"] = (
+                part.loc[row_index, "manual_row_uuid"]
+                if row_index in part.index
+                else None
+            )
     return rows, events, issues, values
 
 

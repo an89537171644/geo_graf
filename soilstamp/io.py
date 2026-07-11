@@ -475,7 +475,15 @@ def _canonical_header(value: Any) -> str | None:
     return None
 
 
-def _parse_number(value: Any, *, family: str | None = None) -> float | None:
+def parse_decimal(value: Any, *, family: str | None = None) -> float | None:
+    """Parse one finite decimal value without changing its physical unit.
+
+    Both decimal comma and decimal point are accepted.  ``family`` applies
+    the same cell-safety rules as the strict Excel importer: unit suffixes in
+    primary cells are rejected because their conversion belongs to explicit
+    metadata, not to text parsing.
+    """
+
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -509,6 +517,10 @@ def _parse_number(value: Any, *, family: str | None = None) -> float | None:
         return None
     number = float(match.group(1))
     return number if math.isfinite(number) else None
+
+
+# Private compatibility name retained for the established import pipeline.
+_parse_number = parse_decimal
 
 
 def _is_failure(value: Any) -> bool:
