@@ -16,7 +16,7 @@ from .data import (
     prepare_measurements,
     validate_measurements,
 )
-from .io import read_protocol, read_protocol_excel
+from .io import parse_decimal, read_protocol, read_protocol_excel
 from .indicators import (
     indicator_audit_frame,
     indicator_event_frame,
@@ -25,9 +25,24 @@ from .indicators import (
     resolve_indicator_passport,
 )
 from .provenance import build_provenance, passport_completeness
+from .manual_entry_adapter import (
+    ManualExperimentSource,
+    ManualInputBundle,
+    adapt_manual_draft,
+)
+from .manual_entry_models import (
+    ManualAuditEvent,
+    ManualDraft,
+    ManualPassport,
+    ManualPoint,
+    ManualReinforcement,
+)
+from .manual_entry_validation import ManualValidationResult, validate_manual_draft
+from .sources import ExcelExperimentSource, ExperimentSource
 from .schema import (
     CorrectionRecord,
     Experiment,
+    ExperimentPoint,
     IndicatorPassport,
     IndicatorProcessingResult,
     MeasuredPoint,
@@ -47,9 +62,20 @@ __all__ = [
     "CorrectionRecord",
     "deformation_work",
     "estimate_moduli",
+    "ExcelExperimentSource",
     "Experiment",
+    "ExperimentPoint",
+    "ExperimentSource",
     "IndicatorPassport",
     "IndicatorProcessingResult",
+    "ManualAuditEvent",
+    "ManualDraft",
+    "ManualExperimentSource",
+    "ManualInputBundle",
+    "ManualPassport",
+    "ManualPoint",
+    "ManualReinforcement",
+    "ManualValidationResult",
     "failure_summary",
     "fit_segmented_pcr",
     "group_mean_curve",
@@ -64,6 +90,8 @@ __all__ = [
     "RawCell",
     "RawRow",
     "build_provenance",
+    "adapt_manual_draft",
+    "parse_decimal",
     "passport_completeness",
     "prepare_measurements",
     "process_indicator_frame",
@@ -71,6 +99,7 @@ __all__ = [
     "read_protocol_excel",
     "resolve_indicator_passport",
     "validate_measurements",
+    "validate_manual_draft",
 ]
 
 __version__ = VERSION

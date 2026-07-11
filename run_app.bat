@@ -15,10 +15,10 @@ if errorlevel 1 (
   echo Окружение .venv создано старой версией Python. Удалите .venv и запустите снова.
   exit /b 1
 )
-if not exist ".venv\.installed-0.4.1a2-indicators" (
+if not exist ".venv\.installed-0.5.0b2.dev1-manual" (
   ".venv\Scripts\python.exe" -m pip install -e .
   if errorlevel 1 exit /b 1
-  type nul > ".venv\.installed-0.4.1a2-indicators"
+  type nul > ".venv\.installed-0.5.0b2.dev1-manual"
 )
 ".venv\Scripts\python.exe" -m streamlit run app.py
 if errorlevel 1 exit /b 1

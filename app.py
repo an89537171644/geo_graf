@@ -46,6 +46,14 @@ from soilstamp.indicators import (
     indicator_event_frame,
     indicator_passport_frame,
 )
+from soilstamp.gui_manual_entry import (
+    MANUAL_ACTIVE_HASH_KEY,
+    MANUAL_SERVICE_KEY,
+    MANUAL_SOURCE_REQUEST_KEY,
+    active_manual_draft,
+    render_manual_entry,
+)
+from soilstamp.manual_entry_adapter import adapt_manual_draft
 from soilstamp.plotting import export_figure, plot_curves, plot_stamp_schematic
 from soilstamp.provenance import (
     build_provenance,
@@ -189,6 +197,10 @@ def _reset_for_dataset(key: str, raw: pd.DataFrame, input_context: dict) -> None
             "dataset_sha256": key,
             "import": input_context["import_info"],
             "provenance": input_context["provenance"].to_dict(),
+            "manual_draft_sha256": input_context.get("manual_draft_sha256"),
+            "manual_audit_event_count": len(
+                input_context.get("manual_audit_events") or []
+            ),
         },
         after=raw,
         method=f"{input_context['import_info'].get('format', 'unknown')}_import",
@@ -204,9 +216,67 @@ def _reset_for_dataset(key: str, raw: pd.DataFrame, input_context: dict) -> None
     st.session_state.revision = 0
 
 
+def _manual_input_context(draft) -> dict:
+    """Build the regular import context from an explicitly frozen draft."""
+
+    bundle = adapt_manual_draft(draft)
+    config = {
+        "import_mode": "manual",
+        "source": "manual",
+        "draft_schema_version": draft.schema_version,
+        "draft_id": draft.draft_id,
+        "draft_sha256": draft.sha256,
+    }
+    provenance = build_provenance(
+        input_source=bundle.source_bytes,
+        metadata_source=bundle.metadata_bytes,
+        config=config,
+        project_root=BASE_DIR,
+    )
+    safe_test_id = draft.passport.test_id or draft.draft_id
+    return {
+        "raw": bundle.raw,
+        "metadata": bundle.metadata,
+        "import_info": bundle.import_info,
+        # Adapter issues are the source-specific part. The common metadata and
+        # measurement checks run below through the unchanged application path.
+        "import_issues": bundle.validation.adapter_issues,
+        "raw_cells": bundle.raw_cells,
+        "provenance": provenance,
+        "passport": passport_completeness(bundle.metadata),
+        "source_file_name": f"{safe_test_id}.manual-draft.json",
+        "source_file_bytes": bundle.source_bytes,
+        "metadata_file_name": f"{safe_test_id}.manual-metadata.json",
+        "metadata_file_bytes": bundle.metadata_bytes,
+        "column_mapping": None,
+        "provenance_config": config,
+        "manual_draft": draft.to_dict(),
+        "manual_draft_sha256": draft.sha256,
+        "manual_audit_events": [
+            event.to_dict() for event in draft.audit_events
+        ],
+    }
+
+
 def _load_inputs() -> dict:
     st.sidebar.header("Данные")
-    source = st.sidebar.radio("Источник", ["Демонстрационный набор", "Загрузить файлы"])
+    if st.session_state.pop(MANUAL_SOURCE_REQUEST_KEY, False):
+        st.session_state["data_source"] = "Ввод вручную"
+    source = st.sidebar.radio(
+        "Источник",
+        ["Демонстрационный набор", "Загрузить файлы", "Ввод вручную"],
+        key="data_source",
+    )
+    if source == "Ввод вручную":
+        draft = active_manual_draft()
+        if draft is None:
+            st.title(f"Soil Stamp Antonov {VERSION}")
+            (manual_tab,) = st.tabs(["Ввод вручную"])
+            with manual_tab:
+                render_manual_entry(key_prefix="manual_entry_standalone")
+            st.stop()
+        return _manual_input_context(draft)
+
     if source == "Демонстрационный набор":
         protocol_bytes = DEMO_PROTOCOL.read_bytes()
         metadata_bytes = DEMO_METADATA.read_bytes()
@@ -706,9 +776,23 @@ selected_indicator_passports = _scope_indicator_table(
 st.title(f"Soil Stamp Antonov {VERSION}")
 st.caption(
     f"Слой: {correction_mode} · ревизия {st.session_state.revision} · "
-    f"{filtered['test_id'].nunique()} испытаний · source SHA-256 "
+    f"{filtered['test_id'].nunique()} испытаний · источник "
+    f"{import_info.get('source_type', import_info.get('format', 'unknown'))} · source SHA-256 "
     f"{input_context['provenance'].input_file_sha256[:12]}"
 )
+manual_service = st.session_state.get(MANUAL_SERVICE_KEY)
+manual_current_hash = getattr(
+    getattr(manual_service, "draft", None), "sha256", None
+)
+if (
+    import_info.get("source_type") == "manual"
+    and manual_current_hash
+    and manual_current_hash != st.session_state.get(MANUAL_ACTIVE_HASH_KEY)
+):
+    st.warning(
+        "Активный анализ построен по предыдущему snapshot ручного черновика. "
+        "Текущие правки не применены; передайте новый snapshot явно."
+    )
 
 tabs = st.tabs(
     [
@@ -719,8 +803,12 @@ tabs = st.tabs(
         "Сравнение групп",
         "Доп. анализ",
         "Отчёт и журнал",
+        "Ввод вручную",
     ]
 )
+
+with tabs[7]:
+    render_manual_entry(key_prefix="manual_entry_tab")
 
 with tabs[0]:
     c1, c2, c3, c4 = st.columns(4)
@@ -830,6 +918,7 @@ with tabs[0]:
             "test_id",
             "channel",
             "source_row",
+            "manual_row_uuid",
             "sequence_index",
             "branch",
             "original_reading",
@@ -879,7 +968,7 @@ with tabs[0]:
     st.subheader("Provenance")
     st.json(input_context["provenance"].to_dict(), expanded=False)
     if len(input_context["raw_cells"]):
-        with st.expander("Исходные Excel-ячейки и распознанные значения"):
+        with st.expander("Исходные ячейки и распознанные значения"):
             st.dataframe(
                 _display_safe_frame(input_context["raw_cells"]),
                 width="stretch",
@@ -905,6 +994,12 @@ with tabs[0]:
         "sheet_name",
         "source_row",
         "source_columns",
+        "source_type",
+        "manual_row_uuid",
+        "created_by",
+        "created_at",
+        "modified_by",
+        "modified_at",
         "test_id",
         "sequence_no",
         "sequence_index",
@@ -1431,6 +1526,10 @@ with tabs[6]:
             )
     processing_config = {
         "import": input_context["provenance_config"],
+        "manual_draft_sha256": input_context.get("manual_draft_sha256"),
+        "manual_audit_event_count": len(
+            input_context.get("manual_audit_events") or []
+        ),
         "revision": st.session_state.revision,
         "correction_mode": correction_mode,
         "seating_offsets_mm": st.session_state.seating_offsets,
@@ -1512,6 +1611,20 @@ with tabs[6]:
         "indicator_processing_events": selected_indicator_events,
         "indicator_calibration_parameters": selected_indicator_passports,
     }
+    manual_draft_payload = input_context.get("manual_draft")
+    if isinstance(manual_draft_payload, dict):
+        result_tables["manual_primary_rows"] = pd.DataFrame(
+            manual_draft_payload.get("rows") or []
+        )
+        result_tables["manual_entry_audit"] = pd.DataFrame(
+            input_context.get("manual_audit_events") or []
+        )
+        result_tables["manual_draft_manifest"] = {
+            "schema_version": manual_draft_payload.get("schema_version"),
+            "draft_id": manual_draft_payload.get("draft_id"),
+            "draft_sha256": input_context.get("manual_draft_sha256"),
+            "source_type": "manual",
+        }
     analysis_manifest = {}
     for name, table in st.session_state.analysis_tables.items():
         spec = table.attrs.get("analysis_spec", {}) if isinstance(table, pd.DataFrame) else {}

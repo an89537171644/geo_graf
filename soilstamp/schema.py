@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-VERSION = "0.4.1a2"
+VERSION = "0.5.0b2.dev1"
 
 
 REQUIRED_COLUMNS = ("test_id", "stage", "load")
@@ -30,7 +30,7 @@ OPTIONAL_PROTOCOL_COLUMNS = (
     "group",
 )
 
-BRANCHES = ("loading", "hold", "unloading", "reloading")
+BRANCHES = ("loading", "hold", "unloading", "reloading", "cyclic")
 CORRECTION_MODES = ("raw", "zero_shifted", "seating_corrected")
 IMPORT_MODES = ("strict", "interactive", "heuristic")
 FAILURE_WORDS = (
@@ -57,6 +57,7 @@ class ValidationIssue:
     raw_value: Any = None
     suggested_action: str | None = None
     blocks_processing: bool | None = None
+    entity_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.blocks_processing is None:
@@ -108,6 +109,35 @@ class MeasuredPoint:
     parsed_indicator: float | None
     parsed_load: float | None
     load_unit: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ExperimentPoint:
+    """Source-neutral primary point used by Excel and manual sources."""
+
+    test_id: str
+    sequence_no: int
+    stage: Any = None
+    stage_raw: Any = None
+    branch: str | None = None
+    elapsed_time_s: Any = None
+    elapsed_time_raw: Any = None
+    timestamp: Any = None
+    timestamp_raw: Any = None
+    load_raw: Any = None
+    indicator_raws: dict[str, Any] = field(default_factory=dict)
+    row_status: str | None = None
+    comment: str | None = None
+    source_type: str = "unknown"
+    source_row: int | None = None
+    manual_row_uuid: str | None = None
+    created_by: str | None = None
+    created_at: str | None = None
+    modified_by: str | None = None
+    modified_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -213,7 +243,7 @@ class Experiment:
     experiment_date: str | None = None
     operator: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
-    points: list[MeasuredPoint] = field(default_factory=list)
+    points: list[MeasuredPoint | ExperimentPoint] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

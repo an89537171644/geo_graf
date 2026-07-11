@@ -54,7 +54,8 @@ def test_streamlit_user_csv_path_has_no_exceptions() -> None:
     )
 
     assert not app.exception
-    assert len(app.tabs) == 7
+    assert len(app.tabs) == 8
+    assert app.tabs[-1].label == "Ввод вручную"
     assert any(item.value == "Паспорта индикаторов" for item in app.subheader)
     assert any(
         item.value == "Преобразование показаний индикаторов" for item in app.subheader
@@ -73,7 +74,7 @@ def test_streamlit_user_strict_xlsx_path_has_no_exceptions() -> None:
     )
 
     assert not app.exception
-    assert len(app.tabs) == 7
+    assert len(app.tabs) == 8
 
 
 def test_corrupt_xlsx_has_controlled_diagnostic_download() -> None:
@@ -121,7 +122,7 @@ def test_interactive_mapping_preview_and_confirmation_are_scoped_to_sheet() -> N
     confirmation.set_value(True)
     app.run(timeout=120)
     assert not app.exception
-    assert len(app.tabs) == 7
+    assert len(app.tabs) == 8
 
     sheet = next(item for item in app.sidebar.selectbox if item.label == "Лист Excel")
     sheet.set_value(sheet.options[1])
