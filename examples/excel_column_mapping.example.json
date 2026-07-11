@@ -1,0 +1,12 @@
+{
+  "test_id": "A",
+  "stage": "B",
+  "load": "C",
+  "settlement": "D",
+  "branch": "E",
+  "timestamp": "F",
+  "status": "G",
+  "comment": "H",
+  "group": "I",
+  "pair_id": "J"
+}

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "soil-stamp-antonov"
+version = "0.4.1a2"
+description = "Scientific processing and Antonov-style plotting of plate-load tests"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scipy>=1.11",
+  "matplotlib>=3.8",
+  "streamlit>=1.40",
+  "openpyxl>=3.1",
+  "defusedxml>=0.7.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-cov>=5", "pytest-mpl>=0.17"]
+
+[project.scripts]
+soil-stamp = "soilstamp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["soilstamp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --mpl"
+markers = [
+  "mpl_image_compare: image-regression test for publication figures",
+]

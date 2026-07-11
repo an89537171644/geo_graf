@@ -1,0 +1,12 @@
+test_id,stage,branch,load,indicator_1,status,comment
+T-WRAP,0,loading,0.0,0.80,stable,initial reading
+T-WRAP,1,loading,1.0,0.10,stable,zero crossing 1
+T-WRAP,2,loading,2.0,0.45,stable,
+T-WRAP,3,loading,3.0,0.80,stable,
+T-WRAP,4,loading,4.0,0.15,stable,zero crossing 2
+T-WRAP,5,loading,5.0,0.50,stable,
+T-WRAP,6,loading,6.0,0.85,stable,
+T-WRAP,7,loading,7.0,0.20,stable,zero crossing 3
+T-WRAP,8,loading,8.0,0.55,stable,
+T-WRAP,9,loading,9.0,0.90,stable,
+T-WRAP,10,loading,10.0,0.25,stable,zero crossing 4

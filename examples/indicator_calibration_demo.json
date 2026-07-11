@@ -1,0 +1,63 @@
+{
+  "project": "Демонстрация калибровки индикатора",
+  "schema_version": "0.4.1",
+  "load_kind": "force",
+  "load_unit": "kN",
+  "load_factor": 1.0,
+  "load_zero": 0.0,
+  "settlement_unit": "mm",
+  "stamp_shape": "custom",
+  "stamp_area_m2": 0.1,
+  "lever_ratio": 1.0,
+  "poisson_ratio": 0.3,
+  "shape_factor": 1.0,
+  "load_resolution_kN": 0.01,
+  "project_passport": {
+    "project_id": "DEMO-IND-2026",
+    "series_name": "Индикатор: несколько оборотов",
+    "reinforcement_status": "без армирования",
+    "pair_id": "DEMO-PAIR",
+    "soil_batch": "DEMO-SOIL",
+    "experiment_date": "2026-07-11",
+    "operator": "demo-operator",
+    "tray_dimensions_mm": [1200, 1200, 900],
+    "dry_density_kg_m3": 1650,
+    "moisture_percent": 8.0,
+    "soil_type": "демонстрационный песок",
+    "instruments": [
+      {
+        "instrument_id": "IND-DEMO-WRAP-01",
+        "model": "ИЧ-1",
+        "serial_number": "DEMO-WRAP-01",
+        "calibration_date": "2026-06-15",
+        "valid_until": "2030-06-15"
+      }
+    ]
+  },
+  "indicator_passports": {
+    "indicator_1": {
+      "instrument_id": "IND-DEMO-WRAP-01",
+      "type": "ИЧ-1",
+      "serial_number": "DEMO-WRAP-01",
+      "range_mm": 1.0,
+      "division_mm": 0.01,
+      "correction_factor": 1.0,
+      "verification_date": "2026-06-15",
+      "verification_valid_until": "2030-06-15",
+      "mode": "increasing_wrapped",
+      "initial_reading": 0.8,
+      "initial_turn": 0,
+      "zero_correction_mm": 0.05,
+      "max_increment_mm": 0.4,
+      "reverse_tolerance_mm": 0.02,
+      "travel_range_mm": 5.0
+    }
+  },
+  "tests": {
+    "T-WRAP": {
+      "group": "demo",
+      "pair_id": "DEMO-PAIR",
+      "reinforcement": {"type": "none", "layers": 0}
+    }
+  }
+}

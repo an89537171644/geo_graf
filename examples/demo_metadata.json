@@ -1,0 +1,107 @@
+{
+  "project": "Демонстрационная серия штамповых испытаний",
+  "schema_version": "0.4.1",
+  "load_kind": "force",
+  "load_unit": "kN",
+  "load_factor": 1.0,
+  "load_zero": 0.0,
+  "settlement_unit": "mm",
+  "stamp_shape": "circle",
+  "stamp_diameter_mm": 300.0,
+  "stamp_area_m2": 0.0706858347,
+  "stamp_mass_kg": 42.0,
+  "lever_ratio": 1.0,
+  "poisson_ratio": 0.30,
+  "shape_factor": 1.0,
+  "gamma_kN_m3": 18.0,
+  "indicator_resolution_mm": 0.01,
+  "indicator_mode": "direct_displacement",
+  "indicator_unit": "mm",
+  "indicator_calibration_factor": 1.0,
+  "indicator_instrument_id": "IND-DEMO-01",
+  "load_resolution_kN": 0.001,
+  "indicator_sign": 1.0,
+  "reference_sign": -1.0,
+  "project_passport": {
+    "project_id": "DEMO-SSA-2026",
+    "series_name": "Демонстрационная серия штамповых испытаний",
+    "reinforcement_status": "baseline + reinforced",
+    "pair_id": ["P-01", "P-02"],
+    "soil_batch": "S-2026-04",
+    "experiment_date": "2026-04-15",
+    "operator": "demo-operator",
+    "tray_dimensions_mm": [1800, 1200, 1000],
+    "dry_density_kg_m3": 1640,
+    "moisture_percent": 8.5,
+    "soil_type": "fine sand",
+    "instruments": [
+      {
+        "instrument_id": "IND-DEMO-01",
+        "model": "ИЧ-10",
+        "resolution_mm": 0.01,
+        "calibration_date": "2026-03-15"
+      }
+    ]
+  },
+  "box": {
+    "length_mm": 1800,
+    "width_mm": 1200,
+    "height_mm": 1000,
+    "distance_to_wall_mm": 450
+  },
+  "soil": {
+    "batch": "S-2026-04",
+    "density_kg_m3": 1780,
+    "dry_density_kg_m3": 1640,
+    "water_content_percent": 8.5,
+    "gradation": "fine sand"
+  },
+  "instruments": {
+    "indicator_model": "ИЧ-10",
+    "resolution_mm": 0.01,
+    "calibration_date": "2026-03-15",
+    "expanded_uncertainty_mm": 0.02
+  },
+  "indicator_positions_mm": {
+    "indicator_1": [-105, 0],
+    "indicator_2": [0, 105],
+    "indicator_3": [105, 0],
+    "indicator_4": [0, -105]
+  },
+  "tests": {
+    "B-01": {
+      "group": "baseline",
+      "pair_id": "P-01",
+      "reinforcement": {"type": "none", "layers": 0}
+    },
+    "B-02": {
+      "group": "baseline",
+      "pair_id": "P-02",
+      "reinforcement": {"type": "none", "layers": 0}
+    },
+    "R-01": {
+      "group": "reinforced",
+      "pair_id": "P-01",
+      "reinforcement": {
+        "type": "geogrid",
+        "material": "polymer",
+        "layers": 1,
+        "h_over_D": 0.5,
+        "l_over_D": 4.0,
+        "tensile_strength_kN_m": 30
+      }
+    },
+    "R-02": {
+      "group": "reinforced",
+      "pair_id": "P-02",
+      "reinforcement": {
+        "type": "geogrid",
+        "material": "polymer",
+        "layers": 1,
+        "h_over_D": 0.5,
+        "l_over_D": 4.0,
+        "tensile_strength_kN_m": 30
+      }
+    }
+  }
+}
