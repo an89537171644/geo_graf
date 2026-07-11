@@ -29,10 +29,10 @@ jobs:
       PYTHONUTF8: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       MPLBACKEND: Agg
-      MPLCONFIGDIR: ${{ runner.temp }}/soil-stamp-mpl
-      COVERAGE_FILE: ${{ runner.temp }}/soil-stamp-ci/.coverage
-      CI_RESULTS: ${{ runner.temp }}/soil-stamp-ci
-      DEMO_OUT: ${{ runner.temp }}/soil-stamp-ci/demo
+      MPLCONFIGDIR: work/ci-results/matplotlib
+      COVERAGE_FILE: work/ci-results/.coverage
+      CI_RESULTS: work/ci-results
+      DEMO_OUT: work/ci-results/demo
 
     steps:
       - name: Check out repository
