@@ -720,7 +720,6 @@ def _preview(
     if computed is None:
         st.error("Предварительный pipeline не сформировал проверяемый результат.")
         return None
-    bundle = computed.bundle
     prepared = computed.prepared
     pipeline_issues = computed.issues
     blockers = [issue for issue in pipeline_issues if bool(issue.blocks_processing)]

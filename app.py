@@ -9,7 +9,6 @@ import zipfile
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -21,7 +20,6 @@ from soilstamp.analysis import (
     derivative_diagnostics,
     estimate_moduli,
     fit_segmented_pcr,
-    group_mean_curve,
     hysteresis_metrics,
     modulus_sensitivity,
     pressure_at_settlement,
