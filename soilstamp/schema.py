@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 
-VERSION = "0.5.0b2.dev1"
+VERSION = "0.5.0rc1"
 
 
 REQUIRED_COLUMNS = ("test_id", "stage", "load")

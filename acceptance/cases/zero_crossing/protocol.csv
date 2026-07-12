@@ -1,0 +1,4 @@
+test_id,stage,branch,load,indicator_1,status,group
+ZERO-01,0,loading,0.0,9.80,stable,indicator
+ZERO-01,1,loading,1.0,0.20,stable,indicator
+ZERO-01,2,loading,2.0,0.70,stable,indicator

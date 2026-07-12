@@ -1,0 +1,54 @@
+{
+  "contract_version": "acceptance-case/1.0",
+  "template_only": true,
+  "cases": [
+    {
+      "case_id": "REAL-CASE-01-PENDING",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "real_cases/PLACEHOLDER_REAL_CASE_01_PROTOCOL.csv", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+        "metadata": {"path": "real_cases/PLACEHOLDER_REAL_CASE_01_METADATA.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+      },
+      "metadata": {"data_class": "real", "template_only": true, "status": "pending_real_data"},
+      "expected_outputs": {"required_artifacts": [], "scientific_flags": [], "failure_rows": [], "modulus_rows": [], "hashes": {}, "report_package": true, "golden_values": []},
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": [],
+      "expected_review_status": {"failure": [], "moduli": []},
+      "independent_calculation_reference": null,
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "REAL-CASE-02-PENDING",
+      "source_type": "xlsx",
+      "input_files": {
+        "protocol": {"path": "real_cases/PLACEHOLDER_REAL_CASE_02_PROTOCOL.xlsx", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+        "metadata": {"path": "real_cases/PLACEHOLDER_REAL_CASE_02_METADATA.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+      },
+      "metadata": {"data_class": "real", "template_only": true, "status": "pending_real_data"},
+      "expected_outputs": {"required_artifacts": [], "scientific_flags": [], "failure_rows": [], "modulus_rows": [], "hashes": {}, "report_package": true, "golden_values": []},
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": [],
+      "expected_review_status": {"failure": [], "moduli": []},
+      "independent_calculation_reference": null,
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "REAL-CASE-03-PENDING",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "real_cases/PLACEHOLDER_REAL_CASE_03_PROTOCOL.csv", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+        "metadata": {"path": "real_cases/PLACEHOLDER_REAL_CASE_03_METADATA.json", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+      },
+      "metadata": {"data_class": "real", "template_only": true, "status": "pending_real_data", "manual_entry_requires_engineering_review": true},
+      "expected_outputs": {"required_artifacts": [], "scientific_flags": [], "failure_rows": [], "modulus_rows": [], "hashes": {}, "report_package": true, "golden_values": []},
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": [],
+      "expected_review_status": {"failure": [], "moduli": []},
+      "independent_calculation_reference": null,
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    }
+  ]
+}

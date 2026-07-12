@@ -1,0 +1,3 @@
+test_id,stage,branch,load,settlement,status,group
+RIGHT-01,1,loading,10.0,1.0,stable,censored
+RIGHT-01,2,loading,30.0,4.0,stable,censored

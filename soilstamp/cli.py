@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -135,6 +136,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--column-map", type=Path, help="JSON {canonical_field: Excel column/header}")
     parser.add_argument("--sheet", help="Имя листа XLSX")
     parser.add_argument("--header-row", type=int, help="Номер строки заголовков XLSX (1-based)")
+    return parser
+
+
+def build_acceptance_parser() -> argparse.ArgumentParser:
+    """Build the dedicated release-candidate acceptance command parser."""
+
+    parser = argparse.ArgumentParser(
+        prog="soil-stamp acceptance-run",
+        description="Run the versioned acceptance manifest through the production pipeline.",
+    )
+    parser.add_argument("manifest", type=Path, help="acceptance-case/1.0 manifest JSON")
+    parser.add_argument("--out", type=Path, required=True, help="acceptance report directory")
     return parser
 
 
@@ -680,11 +693,28 @@ def run(args: argparse.Namespace) -> Path:
     return bundle_path
 
 
-def main() -> None:
-    args = build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["acceptance-run"]:
+        from .acceptance import run_acceptance_manifest
+
+        acceptance_args = build_acceptance_parser().parse_args(arguments[1:])
+        result = run_acceptance_manifest(acceptance_args.manifest, acceptance_args.out)
+        print(f"Acceptance JSON: {result.json_report.resolve()}")
+        print(f"Acceptance Markdown: {result.markdown_report.resolve()}")
+        print(f"Acceptance HTML: {result.html_report.resolve()}")
+        if result.exit_code:
+            print(
+                f"Критические несоответствия приёмки: {result.critical_failure_count}",
+                file=sys.stderr,
+            )
+        return result.exit_code
+
+    args = build_parser().parse_args(arguments)
     path = run(args)
     print(f"Готово: {path.resolve()}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

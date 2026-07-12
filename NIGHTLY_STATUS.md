@@ -3,9 +3,10 @@
 ## Repository
 
 - Base branch: `main`
-- Base SHA: `89aef39952931ed50287a890f2da529118373aeb` (current `main`)
-- Working branch: `overnight/scientific-hardening-2026-07-11`
-- Draft PR: https://github.com/an89537171644/geo_graf/pull/5
+- Base SHA: `e0d303478c7e166b5a608bf90c0a351b4a26ec29` (актуальный `main` на старте TASK 06)
+- Working branch: `release/0.5.0rc1`
+- Candidate version: `0.5.0rc1`
+- Release classification: **candidate for engineering acceptance**, not a final release
 - Phase 00 code head: `85ec0e06689629b250d60ee720a37dde1c4feabf`
 - Phase 01 local code head: `0474c80`
 - Phase 01 remote head: `74320b5d667f39bd551e3894dfb05aae446de095`
@@ -28,6 +29,44 @@
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
 | 04 Plots/censoring | COMPLETE | local `420e5f0`; remote `47488d6` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | [run 29191539241](https://github.com/an89537171644/geo_graf/actions/runs/29191539241): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
 | 05 Stretch / reporting A | COMPLETE | local `fee902c`; remote `34273e5` | 387 tests; core 130 tests / 84.57%; Ruff/compile/pip check PASS; CLI demo and hardened semantic verifier PASS | [run 29193972740](https://github.com/an89537171644/geo_graf/actions/runs/29193972740): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Deterministic HTML/XLSX approval package, exact source bytes, formula-safe cells, explicit review registry and self-contained `approval/` archive tree; SQLite Priority B not started |
+
+Фазы 00–05 интегрированы в исходную точку TASK 06. Указанные commit SHA сохраняются
+как историческая трассировка веток разработки; актуальная объединённая точка — base
+SHA выше. Исторические implementation PR не являются текущим release-candidate PR
+и не используются как незавершённые gates TASK 06.
+
+## TASK 06 release-candidate gate
+
+TASK 06 выполняется только в ветке `release/0.5.0rc1`; результаты предыдущих веток
+ниже не переиспользуются как доказательство. Фактический локальный прогон от
+2026-07-12 на объединённом рабочем дереве TASK 06:
+
+- package metadata, runtime и provenance: `0.5.0rc1`; `pip check`: PASS;
+- Ruff: PASS; `compileall` для `app.py`, `soilstamp`, `tests`, `scripts` и
+  acceptance-only XLSX materializer: PASS;
+- полный pytest: **414 passed**; включённый Streamlit AppTest: **8 passed**;
+- calculation-core: **130 passed**, coverage **84.57%** при gate 80%;
+- CLI demo: PASS; semantic verifier: PASS; SHA-256 `reproducibility.zip`:
+  `0405eb6fc1b1f00fd5a90bce420bded45d8d4c5b25a7c4173a34550078bebbe9`;
+- exact acceptance command: exit `0`, **10/10 synthetic cases PASS**, critical
+  mismatches `0`, `synthetic_acceptance_passed=true`,
+  `engineering_acceptance=false`; все 10 engineering gates остаются `unsigned`.
+
+Приёмочный прогон выполнен командой:
+
+```text
+soil-stamp acceptance-run acceptance/manifest.json --out acceptance/results
+```
+
+SHA-256 локальных отчётов: JSON
+`178d66908b923393f2858b34930bb1d906e92aa43f65cbe9b46d376e402eb4c6`, Markdown
+`22b518a12a36e4979bbd0b5289a201f56c93c82e18f64eaf056b3adbcfad1fdc`, HTML
+`ac23b834aa99802d2023eb3bd083c3465c0e3e37f968e48c1886051fa239ae1f`.
+
+GitHub matrix для точного remote release-candidate SHA должна быть зафиксирована в
+Draft PR после создания commit; до этого она намеренно не помечена здесь как PASS.
+Успешные synthetic cases подтверждают воспроизводимость framework, но не подписывают
+шаблоны реальных испытаний и не означают окончательный релиз.
 
 ## Numerical changes
 
@@ -122,10 +161,16 @@ with SHA-256 `2DAE243C6674C9E31673B757B78C1511065E5B8DD96D966BCB7716B13BCB849B`.
   require engineering review; manual input also requires engineering acceptance.
 - SQLite archive, approved revisions, backup/restore and clean Windows distribution
   are not implemented and require engineering review.
-- Owner review and merge decision for Draft PR #5. Codex did not merge or enable auto-merge.
+- Methodology source title, author, year, page/section and source reference/hash for
+  `antonov_round_stamp_v1` require engineering completion and review.
+- The project owner has not selected a software license; no `LICENSE` is present.
+- Release-candidate local and GitHub CI gates must be recorded for the exact TASK 06
+  head before a readiness decision.
+- Final release, tag, merge and distribution decisions remain with the owner and are
+  outside TASK 06.
 
 The existing support-adaptive `compare_groups()` inference remains a separate,
 previously accepted comparison method; Phase 04 common-support rules apply to
 publication/group-curve aggregation and do not silently redefine that method.
 
-Current status: research beta under author control; not a finished engineering release.
+Current status: `0.5.0rc1` candidate for engineering acceptance; not a final release.

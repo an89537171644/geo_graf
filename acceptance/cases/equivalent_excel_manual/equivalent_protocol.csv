@@ -1,0 +1,4 @@
+test_id,stage,branch,load,indicator_1,status,comment,group
+EQ-01,0,loading,0.0,9.80,stable,point 0,baseline
+EQ-01,1,loading,1.0,0.20,stable,point 1,baseline
+EQ-01,2,loading,2.0,0.70,stable,point 2,baseline
