@@ -3,18 +3,19 @@
 ## Repository
 
 - Base branch: `main`
-- Base SHA: `668e5fa652d9b070f597a095b1dc5d5042a76ede`
+- Base SHA: `89aef39952931ed50287a890f2da529118373aeb` (current `main`)
 - Working branch: `overnight/scientific-hardening-2026-07-11`
-- Draft PR: https://github.com/an89537171644/geo_graf/pull/4
+- Draft PR: https://github.com/an89537171644/geo_graf/pull/5
 - Phase 00 code head: `85ec0e06689629b250d60ee720a37dde1c4feabf`
 - Phase 01 local code head: `0474c80`
+- Phase 01 remote head: `74320b5d667f39bd551e3894dfb05aae446de095`
 
 ## Phase status
 
 | Phase | Status | Commit | Local gate | GitHub CI | Notes |
 |---|---|---|---|---|---|
-| 00 CI | COMPLETE | `f59370f`, `85ec0e0` | 180 tests; coverage 81.54%; demo verified | [run 29169591778](https://github.com/an89537171644/geo_graf/actions/runs/29169591778): 6/6 matrix + Required CI SUCCESS | Only verified CI infrastructure; scientific modules unchanged |
-| 01 E contract | LOCAL COMPLETE / CI PENDING | `0474c80` | 215 tests; core coverage 80.97%; CLI demo verified | Pending push and GitHub matrix | Owner explicitly authorised the next phase; no primary E without an approved profile, confirmed range and valid positive calculation |
+| 00 CI | COMPLETE / MERGED BY OWNER | `f59370f`, `85ec0e0`, `8a84f7a` | 180 tests; coverage 81.54%; demo verified | [run 29169728497](https://github.com/an89537171644/geo_graf/actions/runs/29169728497): 6/6 matrix + Required CI SUCCESS | PR #4 was merged externally into `main`; Codex did not invoke merge |
+| 01 E contract | COMPLETE | local `0474c80`; remote `74320b5` | 215 tests; core coverage 80.97%; CLI demo verified | [run 29184900474](https://github.com/an89537171644/geo_graf/actions/runs/29184900474): 6/6 matrix + Required CI SUCCESS; 6 artifacts | No primary E without an approved profile, confirmed in-range interval and valid positive calculation |
 | 02 Pairing | NOT STARTED | — | — | — | Strict phase order |
 | 03 Indicators/metrology | NOT STARTED | — | — | — | Strict phase order |
 | 04 Plots/censoring | NOT STARTED | — | — | — | Strict phase order |
@@ -39,11 +40,10 @@ logic were not changed.
 
 ## Remaining blockers
 
-- GitHub matrix acceptance for Phase 01 after push.
 - Engineering selection/approval of a pressure range for each real primary modulus.
 - Pairing schema, multi-indicator aggregation/metrology, and censored-failure presentation.
 - Real laboratory acceptance on at least three experiments.
 - SQLite archive and clean Windows distribution.
-- Owner review and merge decision. No merge or auto-merge was performed.
+- Owner review and merge decision for Draft PR #5. Codex did not merge or enable auto-merge.
 
 Current status: research beta under author control; not a finished engineering release.
