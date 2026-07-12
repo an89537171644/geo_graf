@@ -37,6 +37,7 @@ from soilstamp.data import (
     AuditTrail,
     apply_manual_point_correction,
     apply_settlement_correction,
+    failure_analysis_summary,
     failure_summary,
     prepare_measurements,
 )
@@ -60,7 +61,13 @@ from soilstamp.gui_manual_entry import (
     render_manual_entry,
 )
 from soilstamp.manual_entry_adapter import adapt_manual_draft
-from soilstamp.plotting import export_figure, plot_curves, plot_stamp_schematic
+from soilstamp.plotting import (
+    export_figure,
+    plot_curves,
+    plot_failure_intervals,
+    plot_stamp_schematic,
+    resolve_curve_selections,
+)
 from soilstamp.provenance import (
     build_provenance,
     effective_conversion_parameters,
@@ -129,6 +136,213 @@ def _scope_indicator_table(table: pd.DataFrame, test_ids: list[str]) -> pd.DataF
         return table.copy()
     selected = {str(value) for value in test_ids}
     return table[table["test_id"].astype(str).isin(selected)].copy()
+
+
+def _metadata_curve_selection_records(metadata: dict) -> list[dict]:
+    payload = metadata.get("publication_curve_selection")
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict):
+        version = payload.get("contract_version")
+        if version not in {None, "publication-curve-selection/1.0"}:
+            raise ValueError(
+                "Неподдерживаемая версия publication_curve_selection: "
+                f"{version!r}."
+            )
+        records = payload.get("decisions")
+    else:
+        raise ValueError("publication_curve_selection должен быть объектом или массивом.")
+    if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+        raise ValueError("publication_curve_selection.decisions должен быть массивом объектов.")
+    return [dict(item) for item in records]
+
+
+def _decision_records(resolved) -> list[dict]:
+    return [
+        {
+            "group": decision.group,
+            "method": decision.method,
+            "test_id": decision.test_id,
+            "author": decision.author,
+            "timestamp_utc": decision.timestamp_utc,
+            "reason": decision.reason,
+        }
+        for _, decision in sorted(resolved.items())
+    ]
+
+
+def _publication_selection_controls(
+    frame: pd.DataFrame,
+    metadata: dict,
+    *,
+    context_key: str,
+    known_groups: set[str] | None = None,
+) -> list[dict]:
+    """Render and persist explicit per-series publication decisions."""
+
+    stored_by_context = st.session_state.setdefault("publication_curve_decisions", {})
+    stored = stored_by_context.get(context_key)
+    frame_groups = set(frame["group"].dropna().astype(str))
+    repeated_groups = [
+        str(group)
+        for group, part in frame.groupby("group", sort=True)
+        if part["test_id"].astype(str).nunique() > 1
+    ]
+    repeated_group_set = set(repeated_groups)
+    metadata_tests = metadata.get("tests") if isinstance(metadata, dict) else None
+    known_project_groups = frame_groups | set(known_groups or set()) | {
+        str(item.get("group"))
+        for item in (metadata_tests or {}).values()
+        if isinstance(item, dict) and item.get("group") not in (None, "")
+    }
+    supplied_metadata_records = _metadata_curve_selection_records(metadata)
+    supplied_metadata_groups = {
+        str(item.get("group") or "") for item in supplied_metadata_records
+    }
+    unknown_metadata_groups = sorted(supplied_metadata_groups - known_project_groups)
+    if unknown_metadata_groups:
+        raise ValueError(
+            "publication_curve_selection содержит неизвестные группы: "
+            + ", ".join(repr(value) for value in unknown_metadata_groups)
+            + "."
+        )
+    metadata_records = [
+        item
+        for item in supplied_metadata_records
+        if str(item.get("group") or "") in frame_groups
+        and str(item.get("group") or "") in repeated_group_set
+    ]
+    active_records = [
+        item
+        for item in list(stored if stored is not None else metadata_records)
+        if str(item.get("group") or "") in repeated_group_set
+    ]
+    existing = {str(item.get("group")): item for item in active_records}
+    if not repeated_groups:
+        return _decision_records(resolve_curve_selections(frame, None))
+
+    st.markdown("##### Явный выбор кривой для повторных серий")
+    st.caption(
+        "Публикационный режим не выбирает первый test ID. "
+        "Подтвердите способ для каждой серии; ручной представитель требует автора, UTC-времени и причины."
+    )
+    candidates: list[dict] = []
+    method_options = [
+        "— выбрать —",
+        "mean_curve",
+        "median_curve",
+        "manual_representative",
+        "individual_curves",
+    ]
+    for group in repeated_groups:
+        previous = existing.get(group, {})
+        previous_method = str(previous.get("method") or "— выбрать —")
+        index = method_options.index(previous_method) if previous_method in method_options else 0
+        method = st.selectbox(
+            f"Серия {group}",
+            method_options,
+            index=index,
+            key=f"curve_method_{context_key}_{group}",
+        )
+        if method == "— выбрать —":
+            continue
+        record: dict = {"group": group, "method": method}
+        if method == "manual_representative":
+            tests = sorted(
+                frame.loc[frame["group"].astype(str).eq(group), "test_id"]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+            previous_test = str(previous.get("test_id") or tests[0])
+            columns = st.columns(2)
+            record["test_id"] = columns[0].selectbox(
+                f"Представитель {group}",
+                tests,
+                index=tests.index(previous_test) if previous_test in tests else 0,
+                key=f"curve_test_{context_key}_{group}",
+            )
+            record["author"] = columns[1].text_input(
+                f"Автор выбора {group}",
+                value=str(previous.get("author") or ""),
+                key=f"curve_author_{context_key}_{group}",
+            )
+            record["timestamp_utc"] = st.text_input(
+                f"UTC-время выбора {group}",
+                value=str(
+                    previous.get("timestamp_utc")
+                    or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                ),
+                key=f"curve_time_{context_key}_{group}",
+            )
+            record["reason"] = st.text_area(
+                f"Причина выбора {group}",
+                value=str(previous.get("reason") or ""),
+                key=f"curve_reason_{context_key}_{group}",
+            )
+        candidates.append(record)
+
+    if st.button("Подтвердить выбор публикационных кривых", key=f"confirm_curves_{context_key}"):
+        try:
+            normalized = _decision_records(resolve_curve_selections(frame, candidates))
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            stored_by_context[context_key] = normalized
+            stored = normalized
+            for decision in normalized:
+                prior = existing.get(str(decision["group"]))
+                if decision == prior:
+                    continue
+                st.session_state.audit.record(
+                    "select_publication_curve",
+                    scope=str(decision["group"]),
+                    reason=str(
+                        decision.get("reason")
+                        or "Явно подтверждён способ публикационного представления серии"
+                    ),
+                    parameters={
+                        "contract_version": "publication-curve-selection/1.0",
+                        **decision,
+                    },
+                    before=prior,
+                    after=decision,
+                    user=str(decision.get("author") or "local-user"),
+                    method=str(decision["method"]),
+                )
+            st.session_state.bundle_cache = {}
+            st.success("Выбор кривых сохранён в журнале текущей ревизии.")
+            active_records = normalized
+
+    if stored is None and metadata_records:
+        audit_key = f"{context_key}:metadata"
+        audited = st.session_state.setdefault("publication_decisions_audited", set())
+        normalized = _decision_records(
+            resolve_curve_selections(frame, metadata_records)
+        )
+        if audit_key not in audited:
+            for decision in normalized:
+                st.session_state.audit.record(
+                    "load_publication_curve_selection",
+                    scope=str(decision["group"]),
+                    reason=str(
+                        decision.get("reason")
+                        or "Явный выбор загружен из metadata проекта"
+                    ),
+                    parameters={
+                        "contract_version": "publication-curve-selection/1.0",
+                        "source": "metadata.publication_curve_selection",
+                        **decision,
+                    },
+                    user=str(decision.get("author") or "metadata"),
+                    method=str(decision["method"]),
+                )
+            audited.add(audit_key)
+        active_records = normalized
+    return active_records
 
 
 def _issue_frame(issues) -> pd.DataFrame:
@@ -219,6 +433,8 @@ def _reset_for_dataset(key: str, raw: pd.DataFrame, input_context: dict) -> None
     st.session_state.analysis_tables = {}
     st.session_state.e_latest = {}
     st.session_state.figure_exports = {}
+    st.session_state.publication_curve_decisions = {}
+    st.session_state.publication_decisions_audited = set()
     st.session_state.bundle_cache = {}
     st.session_state.processing_provenance = {}
     st.session_state.revision = 0
@@ -1192,6 +1408,55 @@ with tabs[1]:
                 st.error(str(exc))
 
 with tabs[2]:
+    selected_failures = failures[failures["test_id"].astype(str).isin(selected_tests)].copy()
+    failure_analysis = failure_analysis_summary(selected_failures)
+    st.markdown("#### Индивидуальные интервалы разрушения")
+    failure_metrics = st.columns(4)
+    failure_metrics[0].metric(
+        "Наблюдалось разрушений", failure_analysis["n_failure_observed"]
+    )
+    failure_metrics[1].metric(
+        "Интервально ценз.", failure_analysis["n_interval_censored"]
+    )
+    failure_metrics[2].metric(
+        "Правоценз.", failure_analysis["n_right_censored"]
+    )
+    failure_metrics[3].metric(
+        "Требует проверки", failure_analysis["n_review_required"]
+    )
+    st.caption(
+        "failure-analysis/1.0 · summary_method=none · "
+        "сводная точечная оценка Fu/pu не рассчитывается"
+    )
+    st.dataframe(_display_safe_frame(selected_failures), hide_index=True, width="stretch")
+    available_capacity_kinds = {
+        value
+        for value in selected_failures.get("capacity_kind", pd.Series(dtype=str))
+        .dropna()
+        .astype(str)
+        if value in {"force", "pressure"}
+    }
+    failure_axis_options = [
+        value for value in ("force", "pressure") if value in available_capacity_kinds
+    ] or ["force", "pressure"]
+    failure_axis = st.selectbox(
+        "Ось диаграммы разрушения",
+        failure_axis_options,
+        key="failure_interval_axis",
+    )
+    failure_analysis["plot_capacity_axis"] = failure_axis
+    failure_plot_output = None
+    try:
+        failure_plot_output = plot_failure_intervals(
+            selected_failures,
+            capacity_axis=failure_axis,
+        )
+        st.pyplot(failure_plot_output.figure, width="stretch")
+        st.caption(failure_plot_output.caption)
+    except ValueError as exc:
+        st.warning(f"Диаграмма интервалов недоступна: {exc}")
+
+    st.divider()
     controls = st.columns([1.25, 1.15, 1.0, 1.0])
     graph_mode = controls[0].selectbox(
         "Режим",
@@ -1238,6 +1503,28 @@ with tabs[2]:
         diagnostic_result = st.session_state.pcr_results.get(latest_key) if latest_key else None
     else:
         graph_data = filtered
+    curve_selection_records: list[dict] = []
+    if graph_mode == "antonov_publication":
+        selection_context = hashlib.sha1(
+            json.dumps(
+                {
+                    "dataset": dataset_key,
+                    "revision": st.session_state.revision,
+                    "correction_mode": correction_mode,
+                    "tests": sorted(selected_tests),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        try:
+            curve_selection_records = _publication_selection_controls(
+                graph_data,
+                metadata,
+                context_key=selection_context,
+                known_groups=set(prepared["group"].dropna().astype(str)),
+            )
+        except ValueError as exc:
+            st.error(f"Выбор публикационных кривых некорректен: {exc}")
     try:
         plot_output = plot_curves(
             graph_data,
@@ -1250,6 +1537,11 @@ with tabs[2]:
             pcr_result=diagnostic_result,
             bootstrap=int(bootstrap_graph),
             seed=202604,
+            selections=(
+                curve_selection_records
+                if graph_mode == "antonov_publication"
+                else None
+            ),
         )
         for warning in plot_output.warnings:
             st.warning(warning)
@@ -1267,6 +1559,10 @@ with tabs[2]:
             "major": major_step,
             "minor": minor_step,
             "bootstrap": int(bootstrap_graph),
+            "curve_selections": plot_output.selection_records,
+            "plotted_point_rows": len(plot_output.plotted_points),
+            "failure_analysis": failure_analysis,
+            "failure_axis": failure_axis,
             "pcr": diagnostic_result.to_dict() if diagnostic_result is not None else None,
         }
         export_key = hashlib.sha1(
@@ -1784,6 +2080,8 @@ with tabs[6]:
         "manual_overrides": st.session_state.manual_overrides,
         "selected_tests": sorted(selected_tests),
         "graph": locals().get("export_spec"),
+        "failure_analysis": failure_analysis,
+        "failure_axis": failure_axis,
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "analysis_specs": analysis_specs_for_provenance,
         "target_pressure_kPa": float(target_p),
@@ -1841,6 +2139,17 @@ with tabs[6]:
         import_info=import_info,
         source_test_ids=raw["test_id"].dropna().astype(str).unique().tolist(),
         source_row_count=len(raw),
+        failure_analysis=failure_analysis,
+        curve_selections=(
+            plot_output.selection_records
+            if "plot_output" in locals() and plot_output is not None
+            else []
+        ),
+        plotted_curve_points=(
+            plot_output.plotted_points
+            if "plot_output" in locals() and plot_output is not None
+            else pd.DataFrame()
+        ),
     )
     st.subheader("Отчёт")
     st.markdown(report)
@@ -1848,6 +2157,17 @@ with tabs[6]:
 
     result_tables = {
         "failure_summary": failures[failures["test_id"].isin(selected_tests)],
+        "failure_analysis": failure_analysis,
+        "curve_selections": pd.DataFrame(
+            plot_output.selection_records
+            if "plot_output" in locals() and plot_output is not None
+            else []
+        ),
+        "plotted_curve_points": (
+            plot_output.plotted_points
+            if "plot_output" in locals() and plot_output is not None
+            else pd.DataFrame()
+        ),
         "audit": st.session_state.audit.to_frame(),
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "derivatives": derivatives,
@@ -1896,6 +2216,8 @@ with tabs[6]:
         "tests": selected_tests,
         "caption": current_caption,
         "graph": locals().get("export_spec"),
+        "failure_analysis": failure_analysis,
+        "failure_axis": failure_axis,
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "analysis_manifest": analysis_manifest,
         "target_pressure_kPa": float(target_p),
@@ -1925,6 +2247,20 @@ with tabs[6]:
                     "current.pdf": graph_exports["pdf"],
                     "current_600dpi.png": graph_exports["png"],
                 }
+            if "failure_plot_output" in locals() and failure_plot_output is not None:
+                figure_payloads.update(
+                    {
+                        "failure_intervals.svg": export_figure(
+                            failure_plot_output.figure, "svg"
+                        ),
+                        "failure_intervals.pdf": export_figure(
+                            failure_plot_output.figure, "pdf"
+                        ),
+                        "failure_intervals_600dpi.png": export_figure(
+                            failure_plot_output.figure, "png"
+                        ),
+                    }
+                )
             st.session_state.bundle_cache[bundle_key] = reproducibility_bundle(
                 raw=raw,
                 prepared=filtered,
@@ -1939,6 +2275,8 @@ with tabs[6]:
                     "correction_mode": correction_mode,
                     "selected_tests": selected_tests,
                     "graph": locals().get("export_spec"),
+                    "failure_analysis": failure_analysis,
+                    "failure_axis": failure_axis,
                     "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
                     "analysis_manifest": analysis_manifest,
                     "target_pressure_kPa": float(target_p),
@@ -1984,3 +2322,5 @@ with tabs[6]:
 
 if "plot_output" in locals() and plot_output is not None:
     plt.close(plot_output.figure)
+if "failure_plot_output" in locals() and failure_plot_output is not None:
+    plt.close(failure_plot_output.figure)

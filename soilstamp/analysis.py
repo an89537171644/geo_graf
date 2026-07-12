@@ -645,12 +645,18 @@ def _test_curves(
     pressure: str = "p_kPa",
     settlement: str = "settlement_mm",
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    curve_parts = sorted(
+        ((str(test_id), part) for test_id, part in frame.groupby("test_id", sort=False)),
+        key=lambda item: item[0],
+    )
+    if len({test_id for test_id, _ in curve_parts}) != len(curve_parts):
+        raise ValueError("test_id должны быть уникальны после строкового преобразования.")
     curves: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for test_id, part in frame.groupby("test_id", sort=False):
+    for test_id, part in curve_parts:
         points = _finite_loading_points(part, pressure=pressure, settlement=settlement)
         p, s, _ = _deduplicate_pressure(points, pressure, settlement)
         if len(p) >= 1:
-            curves[str(test_id)] = (p, s)
+            curves[test_id] = (p, s)
     return curves
 
 
@@ -664,18 +670,21 @@ def _common_union_grid(curves: dict[str, tuple[np.ndarray, np.ndarray]]) -> np.n
 def _curve_matrix(
     curves: dict[str, tuple[np.ndarray, np.ndarray]], grid: np.ndarray, tolerance: float
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    ids = list(curves)
+    ids = sorted(curves)
     values = np.full((len(ids), len(grid)), np.nan)
     measured = np.zeros((len(ids), len(grid)), dtype=bool)
     for row, test_id in enumerate(ids):
         p, s = curves[test_id]
-        inside = (grid >= p.min() - tolerance) & (grid <= p.max() + tolerance)
-        values[row, inside] = np.interp(grid[inside], p, s)
         for column, level in enumerate(grid):
             hits = np.flatnonzero(np.isclose(p, level, rtol=0.0, atol=tolerance))
             if len(hits):
                 values[row, column] = float(np.mean(s[hits]))
                 measured[row, column] = True
+            elif float(p.min()) <= float(level) <= float(p.max()):
+                # Interpolation is permitted only inside the individual curve
+                # support.  ``np.interp`` outside this interval would silently
+                # manufacture a constant extrapolated tail.
+                values[row, column] = float(np.interp(level, p, s))
     return ids, values, measured
 
 
@@ -689,6 +698,360 @@ def _column_nanmean(values: np.ndarray) -> np.ndarray:
     )
 
 
+def _column_nanmedian(values: np.ndarray) -> np.ndarray:
+    counts = np.sum(np.isfinite(values), axis=0)
+    result = np.full(values.shape[1], np.nan, dtype=float)
+    for column in np.flatnonzero(counts > 0):
+        result[column] = float(np.nanmedian(values[:, column]))
+    return result
+
+
+def _column_statistic(values: np.ndarray, statistic: str) -> np.ndarray:
+    if statistic == "mean":
+        return _column_nanmean(values)
+    if statistic == "median":
+        return _column_nanmedian(values)
+    raise ValueError("statistic должен быть 'mean' или 'median'.")
+
+
+def _constant_positive_test_value(part: pd.DataFrame, column: str, test_id: str) -> float:
+    if column not in part:
+        raise ValueError(f"{test_id}: отсутствует обязательный столбец {column}.")
+    values = pd.to_numeric(part[column], errors="coerce").to_numpy(dtype=float)
+    if len(values) == 0 or not np.isfinite(values).all() or np.any(values <= 0):
+        raise ValueError(f"{test_id}: {column} должен быть конечным и положительным для всех строк.")
+    reference = float(values[0])
+    if not np.allclose(values, reference, rtol=1e-9, atol=1e-12):
+        raise ValueError(f"{test_id}: {column} изменяется внутри одного испытания.")
+    return reference
+
+
+def _coordinate_curves(
+    frame: pd.DataFrame,
+    *,
+    axis_mode: str,
+) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], str, str]:
+    if "test_id" not in frame:
+        raise ValueError("Для агрегирования требуется столбец test_id.")
+    if axis_mode not in {"F-s", "p-s", "p-s/D"}:
+        raise ValueError("axis_mode должен быть 'F-s', 'p-s' или 'p-s/D'.")
+
+    curve_parts = sorted(
+        ((str(test_id), part) for test_id, part in frame.groupby("test_id", sort=False)),
+        key=lambda item: item[0],
+    )
+    if not curve_parts:
+        raise ValueError("Нет испытаний для агрегирования.")
+    if len({test_id for test_id, _ in curve_parts}) != len(curve_parts):
+        raise ValueError("test_id должны быть уникальны после строкового преобразования.")
+
+    if axis_mode == "F-s":
+        geometry = [
+            (
+                test_id,
+                _constant_positive_test_value(part, "D_mm", test_id),
+                _constant_positive_test_value(part, "stamp_area_m2", test_id),
+            )
+            for test_id, part in curve_parts
+        ]
+        diameter = geometry[0][1]
+        area = geometry[0][2]
+        if any(
+            not np.isclose(item[1], diameter, rtol=1e-9, atol=1e-12)
+            or not np.isclose(item[2], area, rtol=1e-9, atol=1e-12)
+            for item in geometry[1:]
+        ):
+            raise ValueError(
+                "Средняя F-s допустима только для одинаковых диаметра и площади штампа."
+            )
+        x_column = "F_kN"
+        y_quantity = "settlement_mm"
+    else:
+        x_column = "p_kPa"
+        y_quantity = "settlement_over_d" if axis_mode == "p-s/D" else "settlement_mm"
+
+    curves: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for test_id, part in curve_parts:
+        work = part
+        settlement_column = "settlement_mm"
+        if axis_mode == "p-s/D":
+            diameter = _constant_positive_test_value(part, "D_mm", test_id)
+            work = part.copy()
+            settlement_column = "_settlement_over_d"
+            work[settlement_column] = pd.to_numeric(
+                work["settlement_mm"], errors="coerce"
+            ) / diameter
+        points = _finite_loading_points(
+            work,
+            pressure=x_column,
+            settlement=settlement_column,
+        )
+        x_values, y_values, _ = _deduplicate_pressure(
+            points,
+            x_column,
+            settlement_column,
+        )
+        if len(x_values) == 0:
+            raise ValueError(f"{test_id}: нет конечных устойчивых точек для {axis_mode}.")
+        curves[test_id] = (x_values, y_values)
+    return curves, x_column, y_quantity
+
+
+def _coordinate_grid(
+    curves: dict[str, tuple[np.ndarray, np.ndarray]],
+    *,
+    common_support: bool,
+    tolerance: float,
+) -> tuple[np.ndarray, float, float]:
+    levels = _common_union_grid(curves)
+    if len(levels) == 0:
+        raise ValueError("У повторностей нет уровней нагрузки.")
+    minima = [float(x.min()) for x, _ in curves.values()]
+    maxima = [float(x.max()) for x, _ in curves.values()]
+    if common_support:
+        support_lower = max(minima)
+        support_upper = min(maxima)
+        if support_lower > support_upper + tolerance:
+            raise ValueError("У повторностей нет общей области нагрузки.")
+        levels = levels[
+            (levels >= support_lower - tolerance) & (levels <= support_upper + tolerance)
+        ]
+    else:
+        support_lower = min(minima)
+        support_upper = max(maxima)
+    if len(levels) == 0:
+        raise ValueError("У повторностей нет уровней внутри разрешённой области.")
+    return levels, support_lower, support_upper
+
+
+def _aggregate_matrix(
+    matrix: np.ndarray,
+    *,
+    statistic: str,
+    confidence: float,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, np.ndarray]:
+    n = np.sum(np.isfinite(matrix), axis=0)
+    aggregate = _column_statistic(matrix, statistic)
+    alpha = 1.0 - confidence
+
+    if statistic == "mean":
+        sd = np.array(
+            [
+                np.nanstd(matrix[:, column], ddof=1) if n[column] >= 2 else np.nan
+                for column in range(matrix.shape[1])
+            ]
+        )
+        se = sd / np.sqrt(n)
+        critical = np.array(
+            [
+                stats.t.ppf(1.0 - alpha / 2.0, int(count - 1))
+                if count >= 2
+                else np.nan
+                for count in n
+            ]
+        )
+        t_low = aggregate - critical * se
+        t_high = aggregate + critical * se
+    else:
+        se = np.full(matrix.shape[1], np.nan, dtype=float)
+        t_low = np.full(matrix.shape[1], np.nan, dtype=float)
+        t_high = np.full(matrix.shape[1], np.nan, dtype=float)
+
+    rng = np.random.default_rng(seed)
+    boot_statistics: list[np.ndarray] = []
+    if matrix.shape[0] >= 2:
+        for _ in range(max(0, int(bootstrap))):
+            selected = rng.integers(0, matrix.shape[0], size=matrix.shape[0])
+            boot_statistics.append(_column_statistic(matrix[selected], statistic))
+    if boot_statistics:
+        boot = np.vstack(boot_statistics)
+        point_low = np.nanquantile(boot, alpha / 2.0, axis=0)
+        point_high = np.nanquantile(boot, 1.0 - alpha / 2.0, axis=0)
+        if statistic == "median":
+            band_scale = np.nanstd(boot, axis=0, ddof=1)
+        else:
+            band_scale = se
+        standardization_scale = np.where(
+            np.isfinite(band_scale) & (band_scale > EPS), band_scale, np.nan
+        )
+        valid_scale = np.isfinite(standardization_scale)
+        if valid_scale.any():
+            standardized = np.abs(
+                (boot[:, valid_scale] - aggregate[valid_scale])
+                / standardization_scale[valid_scale]
+            )
+            valid_rows = np.isfinite(standardized).any(axis=1)
+            maxima = (
+                np.nanmax(standardized[valid_rows], axis=1)
+                if valid_rows.any()
+                else np.array([])
+            )
+            maxima = maxima[np.isfinite(maxima)]
+            q = float(np.quantile(maxima, confidence)) if len(maxima) else np.nan
+            simultaneous_low = aggregate - q * band_scale
+            simultaneous_high = aggregate + q * band_scale
+        else:
+            # Identical curves: the empirical band collapses to the aggregate.
+            simultaneous_low = aggregate.copy()
+            simultaneous_high = aggregate.copy()
+    else:
+        point_low = point_high = simultaneous_low = simultaneous_high = np.full(
+            matrix.shape[1], np.nan
+        )
+
+    insufficient = n < 2
+    for values in (
+        t_low,
+        t_high,
+        point_low,
+        point_high,
+        simultaneous_low,
+        simultaneous_high,
+    ):
+        values[insufficient] = np.nan
+    return {
+        "n": n,
+        "aggregate": aggregate,
+        "t_low": t_low,
+        "t_high": t_high,
+        "bootstrap_low": point_low,
+        "bootstrap_high": point_high,
+        "simultaneous_low": simultaneous_low,
+        "simultaneous_high": simultaneous_high,
+    }
+
+
+def aggregate_group_curve(
+    frame: pd.DataFrame,
+    *,
+    axis_mode: str = "p-s",
+    statistic: str = "mean",
+    confidence: float = 0.95,
+    bootstrap: int = 1000,
+    seed: int = 202604,
+    coordinate_tolerance: float = 1e-8,
+) -> pd.DataFrame:
+    """Aggregate one repeat series in explicitly selected coordinates.
+
+    ``F-s`` and ``p-s`` use only the intersection of individual supports.
+    ``p-s/D`` first normalizes every test by its own diameter and then uses the
+    union of measured pressure levels; each test contributes only inside its
+    own support.  No coordinate mode extrapolates a curve.
+    """
+
+    if not 0.0 < float(confidence) < 1.0:
+        raise ValueError("confidence должен находиться между 0 и 1.")
+    if not np.isfinite(coordinate_tolerance) or coordinate_tolerance < 0:
+        raise ValueError("coordinate_tolerance должен быть конечным и неотрицательным.")
+    if statistic not in {"mean", "median"}:
+        raise ValueError("statistic должен быть 'mean' или 'median'.")
+
+    groups = (
+        sorted(frame["group"].dropna().astype(str).unique().tolist())
+        if "group" in frame
+        else []
+    )
+    if len(groups) > 1:
+        raise ValueError("aggregate_group_curve принимает ровно одну группу испытаний.")
+    group_name = groups[0] if groups else ""
+
+    curves, x_column, y_quantity = _coordinate_curves(frame, axis_mode=axis_mode)
+    grid, support_lower, support_upper = _coordinate_grid(
+        curves,
+        common_support=axis_mode in {"F-s", "p-s"},
+        tolerance=coordinate_tolerance,
+    )
+    ids, matrix, measured = _curve_matrix(curves, grid, coordinate_tolerance)
+    summary = _aggregate_matrix(
+        matrix,
+        statistic=statistic,
+        confidence=confidence,
+        bootstrap=bootstrap,
+        seed=seed,
+    )
+    n = summary["n"].astype(int)
+    measured_n = measured.sum(axis=0).astype(int)
+    interpolated_n = n - measured_n
+    aggregate = summary["aggregate"]
+    physical_settlement_mm = y_quantity == "settlement_mm"
+    mean_alias = (
+        aggregate
+        if statistic == "mean" and physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    median_alias = aggregate if statistic == "median" else np.full(len(grid), np.nan)
+    legacy_t_low = (
+        summary["t_low"] if physical_settlement_mm else np.full(len(grid), np.nan)
+    )
+    legacy_t_high = (
+        summary["t_high"] if physical_settlement_mm else np.full(len(grid), np.nan)
+    )
+    legacy_bootstrap_low = (
+        summary["bootstrap_low"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_bootstrap_high = (
+        summary["bootstrap_high"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_simultaneous_low = (
+        summary["simultaneous_low"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_simultaneous_high = (
+        summary["simultaneous_high"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    f_values = grid if x_column == "F_kN" else np.full(len(grid), np.nan)
+    p_values = grid if x_column == "p_kPa" else np.full(len(grid), np.nan)
+    return pd.DataFrame(
+        {
+            "group": group_name,
+            "axis_mode": axis_mode,
+            "statistic": statistic,
+            "x": grid,
+            "y": aggregate,
+            "settlement": aggregate,
+            "aggregate_settlement": aggregate,
+            "mean_settlement_mm": mean_alias,
+            "median_settlement": median_alias,
+            "F_kN": f_values,
+            "p_kPa": p_values,
+            "x_column": x_column,
+            "y_quantity": y_quantity,
+            "t_ci_low": summary["t_low"],
+            "t_ci_high": summary["t_high"],
+            "bootstrap_ci_low": summary["bootstrap_low"],
+            "bootstrap_ci_high": summary["bootstrap_high"],
+            "simultaneous_low": summary["simultaneous_low"],
+            "simultaneous_high": summary["simultaneous_high"],
+            "t_ci_low_mm": legacy_t_low,
+            "t_ci_high_mm": legacy_t_high,
+            "bootstrap_ci_low_mm": legacy_bootstrap_low,
+            "bootstrap_ci_high_mm": legacy_bootstrap_high,
+            "simultaneous_low_mm": legacy_simultaneous_low,
+            "simultaneous_high_mm": legacy_simultaneous_high,
+            "n": n,
+            "measured_n": measured_n,
+            "interpolated_n": interpolated_n,
+            "draw_marker": interpolated_n == 0,
+            "all_measured": interpolated_n == 0,
+            "descriptive_small_n": n < 5,
+            "confidence": confidence,
+            "bootstrap_seed": seed,
+            "support_lower": support_lower,
+            "support_upper": support_upper,
+            "source_test_ids": ",".join(ids),
+        }
+    )
+
+
 def group_mean_curve(
     frame: pd.DataFrame,
     *,
@@ -697,79 +1060,37 @@ def group_mean_curve(
     seed: int = 202604,
     pressure_tolerance_kpa: float = 1e-8,
 ) -> pd.DataFrame:
-    """Mean curve on the union of real levels, with exact t and max-t bands."""
+    """Compatibility wrapper for a mean curve in ``p-s`` coordinates."""
 
-    curves = _test_curves(frame)
-    grid = _common_union_grid(curves)
-    if len(grid) == 0:
-        raise ValueError("У повторностей нет общей области давления.")
-    ids, matrix, measured = _curve_matrix(curves, grid, pressure_tolerance_kpa)
-    n = np.sum(np.isfinite(matrix), axis=0)
-    mean = _column_nanmean(matrix)
-    sd = np.array(
-        [np.nanstd(matrix[:, j], ddof=1) if n[j] >= 2 else np.nan for j in range(len(grid))]
+    result = aggregate_group_curve(
+        frame,
+        axis_mode="p-s",
+        statistic="mean",
+        confidence=confidence,
+        bootstrap=bootstrap,
+        seed=seed,
+        coordinate_tolerance=pressure_tolerance_kpa,
     )
-    se = sd / np.sqrt(n)
-    alpha = 1.0 - confidence
-    critical = np.array(
-        [stats.t.ppf(1.0 - alpha / 2.0, int(count - 1)) if count >= 2 else np.nan for count in n]
-    )
-    t_low = mean - critical * se
-    t_high = mean + critical * se
-
-    rng = np.random.default_rng(seed)
-    boot_means: list[np.ndarray] = []
-    if len(ids) >= 2:
-        for _ in range(max(0, int(bootstrap))):
-            selected = rng.integers(0, len(ids), size=len(ids))
-            boot_means.append(_column_nanmean(matrix[selected]))
-    if boot_means:
-        boot = np.vstack(boot_means)
-        point_low = np.nanquantile(boot, alpha / 2.0, axis=0)
-        point_high = np.nanquantile(boot, 1.0 - alpha / 2.0, axis=0)
-        scale = np.where(np.isfinite(se) & (se > EPS), se, np.nan)
-        valid_scale = np.isfinite(scale)
-        if valid_scale.any():
-            standardized = np.abs((boot[:, valid_scale] - mean[valid_scale]) / scale[valid_scale])
-            valid_rows = np.isfinite(standardized).any(axis=1)
-            maxima = np.nanmax(standardized[valid_rows], axis=1) if valid_rows.any() else np.array([])
-            maxima = maxima[np.isfinite(maxima)]
-            q = float(np.quantile(maxima, confidence)) if len(maxima) else np.nan
-            sim_low = mean - q * se
-            sim_high = mean + q * se
-        else:
-            # Identical curves: the empirical band collapses to the mean.
-            sim_low = mean.copy()
-            sim_high = mean.copy()
-    else:
-        point_low = point_high = sim_low = sim_high = np.full(len(grid), np.nan)
-    insufficient = n < 2
-    t_low[insufficient] = np.nan
-    t_high[insufficient] = np.nan
-    point_low[insufficient] = np.nan
-    point_high[insufficient] = np.nan
-    sim_low[insufficient] = np.nan
-    sim_high[insufficient] = np.nan
-    measured_n = measured.sum(axis=0)
-    return pd.DataFrame(
-        {
-            "p_kPa": grid,
-            "mean_settlement_mm": mean,
-            "t_ci_low_mm": t_low,
-            "t_ci_high_mm": t_high,
-            "bootstrap_ci_low_mm": point_low,
-            "bootstrap_ci_high_mm": point_high,
-            "simultaneous_low_mm": sim_low,
-            "simultaneous_high_mm": sim_high,
-            "n": n.astype(int),
-            "measured_n": measured_n.astype(int),
-            "interpolated_n": (n - measured_n).astype(int),
-            "all_measured": measured_n == n,
-            "descriptive_small_n": n < 5,
-            "confidence": confidence,
-            "bootstrap_seed": seed,
-        }
-    )
+    return result[
+        [
+            "p_kPa",
+            "mean_settlement_mm",
+            "t_ci_low_mm",
+            "t_ci_high_mm",
+            "bootstrap_ci_low_mm",
+            "bootstrap_ci_high_mm",
+            "simultaneous_low_mm",
+            "simultaneous_high_mm",
+            "n",
+            "measured_n",
+            "interpolated_n",
+            "all_measured",
+            "draw_marker",
+            "descriptive_small_n",
+            "confidence",
+            "bootstrap_seed",
+        ]
+    ].copy()
 
 
 def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:

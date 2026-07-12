@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
 from .analysis import calculate_moduli_for_test, fit_segmented_pcr
-from .data import AuditTrail, apply_settlement_correction, failure_summary, prepare_measurements
+from .data import (
+    AuditTrail,
+    apply_settlement_correction,
+    failure_analysis_summary,
+    failure_summary,
+    prepare_measurements,
+)
 from .indicators import (
     indicator_aggregation_frame,
     indicator_audit_frame,
@@ -24,7 +31,12 @@ from .methodology import (
     modulus_profile_ids,
     parse_pressure_range,
 )
-from .plotting import export_figure, plot_curves
+from .plotting import (
+    export_figure,
+    plot_curves,
+    plot_failure_intervals,
+    resolve_curve_selections,
+)
 from .provenance import (
     build_provenance,
     effective_conversion_parameters,
@@ -67,6 +79,26 @@ def build_parser() -> argparse.ArgumentParser:
         ],
         default="p-s",
     )
+    parser.add_argument(
+        "--curve-selections",
+        type=Path,
+        help=(
+            "JSON с явным выбором кривой для каждой серии с повторностями; "
+            "если не задан, используется metadata.publication_curve_selection"
+        ),
+    )
+    parser.add_argument(
+        "--failure-axis",
+        choices=["auto", "force", "pressure"],
+        default="auto",
+        help="Ось отдельной диаграммы индивидуальных интервалов разрушения",
+    )
+    parser.add_argument(
+        "--failure-summary-method",
+        choices=["none"],
+        default="none",
+        help="Метод сводной оценки цензурированных данных; по умолчанию оценка отсутствует",
+    )
     parser.add_argument("--bootstrap", type=int, default=500)
     parser.add_argument("--seed", type=int, default=202604)
     parser.add_argument(
@@ -98,6 +130,71 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sheet", help="Имя листа XLSX")
     parser.add_argument("--header-row", type=int, help="Номер строки заголовков XLSX (1-based)")
     return parser
+
+
+def _curve_selection_records(
+    metadata: dict,
+    selection_path: Path | None,
+) -> list[dict[str, object]]:
+    """Load an explicit, versioned publication selection without inference."""
+
+    if selection_path is not None:
+        payload = json.loads(selection_path.read_text(encoding="utf-8-sig"))
+        source = str(selection_path)
+    else:
+        payload = metadata.get("publication_curve_selection")
+        source = "metadata.publication_curve_selection"
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict):
+        version = payload.get("contract_version")
+        if version not in {None, "publication-curve-selection/1.0"}:
+            raise ValueError(
+                f"{source}: неподдерживаемый contract_version={version!r}."
+            )
+        records = payload.get("decisions")
+    else:
+        raise ValueError(f"{source} должен быть JSON-объектом или массивом.")
+    if not isinstance(records, list):
+        raise ValueError(f"{source}.decisions должен быть массивом.")
+    normalized: list[dict[str, object]] = []
+    for index, record in enumerate(records, start=1):
+        if not isinstance(record, dict):
+            raise ValueError(f"{source}: decision #{index} должен быть объектом.")
+        normalized.append({str(key): value for key, value in record.items()})
+    return normalized
+
+
+def _scope_curve_selection_records(
+    frame: pd.DataFrame,
+    records: list[dict[str, object]],
+    *,
+    known_groups: set[str] | None = None,
+) -> list[dict[str, object]]:
+    """Validate configured groups and keep decisions only for current repeats."""
+
+    active_groups = set(frame["group"].dropna().astype(str))
+    supplied_groups = {str(record.get("group") or "") for record in records}
+    allowed_groups = active_groups | set(known_groups or set())
+    unknown_groups = sorted(supplied_groups - allowed_groups)
+    if unknown_groups:
+        raise ValueError(
+            "Выбор публикационной кривой задан для отсутствующих групп: "
+            + ", ".join(repr(value) for value in unknown_groups)
+            + "."
+        )
+    repeated_groups = {
+        str(group)
+        for group, part in frame.groupby("group", sort=True)
+        if part["test_id"].astype(str).nunique() > 1
+    }
+    return [
+        record
+        for record in records
+        if str(record.get("group") or "") in repeated_groups
+    ]
 
 
 def run(args: argparse.Namespace) -> Path:
@@ -138,6 +235,11 @@ def run(args: argparse.Namespace) -> Path:
     )
     raw = imported.frame
     metadata = read_metadata_json(metadata_bytes)
+    curve_selection_records = (
+        _curve_selection_records(metadata, getattr(args, "curve_selections", None))
+        if args.plot_mode == "antonov_publication"
+        else []
+    )
     prepared, measurement_issues = prepare_measurements(
         raw, metadata, strict_metadata=False
     )
@@ -162,6 +264,30 @@ def run(args: argparse.Namespace) -> Path:
             for issue in blocking
         )
         raise ValueError(details)
+    metadata_tests = metadata.get("tests") if isinstance(metadata, dict) else None
+    known_project_groups = {
+        str(item.get("group"))
+        for item in (metadata_tests or {}).values()
+        if isinstance(item, dict) and item.get("group") not in (None, "")
+    }
+    scoped_curve_selection_records = _scope_curve_selection_records(
+        prepared,
+        curve_selection_records,
+        known_groups=known_project_groups,
+    )
+    if args.plot_mode == "antonov_publication":
+        resolved_curve_selections = resolve_curve_selections(
+            prepared, scoped_curve_selection_records
+        )
+        scoped_groups = {
+            str(record.get("group") or "")
+            for record in scoped_curve_selection_records
+        }
+        active_curve_selection_records = [
+            asdict(resolved_curve_selections[group]) for group in sorted(scoped_groups)
+        ]
+    else:
+        active_curve_selection_records = []
     offsets = None
     if args.seating_offsets:
         offsets = json.loads(args.seating_offsets.read_text(encoding="utf-8-sig"))
@@ -174,6 +300,8 @@ def run(args: argparse.Namespace) -> Path:
     }
     config_snapshot["column_mapping"] = column_mapping
     config_snapshot["seating_offsets_content"] = offsets
+    config_snapshot["curve_selection_decisions_supplied"] = curve_selection_records
+    config_snapshot["curve_selection_decisions_applied"] = active_curve_selection_records
     provenance = build_provenance(
         input_source=protocol_bytes,
         metadata_source=metadata_bytes,
@@ -197,6 +325,18 @@ def run(args: argparse.Namespace) -> Path:
         after=raw,
         method="cli",
     )
+    for decision in active_curve_selection_records:
+        audit.record(
+            "select_publication_curve",
+            scope=str(decision.get("group") or ""),
+            reason=str(decision.get("reason") or "Явный выбор кривой для публикации CLI"),
+            parameters={
+                "contract_version": "publication-curve-selection/1.0",
+                **decision,
+            },
+            user=str(decision.get("author") or "cli"),
+            method=str(decision.get("method") or ""),
+        )
     prepared, correction_issues = apply_settlement_correction(
         prepared,
         args.correction,
@@ -206,6 +346,31 @@ def run(args: argparse.Namespace) -> Path:
     )
     issues.extend(correction_issues)
     failures = failure_summary(prepared)
+    requested_failure_axis = str(getattr(args, "failure_axis", "auto"))
+    failure_analysis = failure_analysis_summary(
+        failures,
+        summary_method=str(getattr(args, "failure_summary_method", "none")),
+        capacity_axis=requested_failure_axis,
+    )
+    if requested_failure_axis == "auto":
+        capacity_kinds = {
+            value
+            for value in failures.get("capacity_kind", pd.Series(dtype=str))
+            .dropna()
+            .astype(str)
+            if value != "unknown"
+        }
+        failure_plot_axis = "pressure" if capacity_kinds == {"pressure"} else "force"
+    else:
+        failure_plot_axis = requested_failure_axis
+    failure_analysis["plot_capacity_axis"] = failure_plot_axis
+    audit.record(
+        "configure_failure_analysis",
+        scope=",".join(failures["test_id"].astype(str).tolist()),
+        reason="Безопасный контракт анализа цензурированных разрушений CLI",
+        parameters=failure_analysis,
+        method=str(failure_analysis["summary_method"]),
+    )
     pcr_results = {}
     modulus_tables = []
     analysis_warnings: list[dict[str, str]] = []
@@ -281,6 +446,15 @@ def run(args: argparse.Namespace) -> Path:
         pcr_result=diagnostic_result,
         bootstrap=args.bootstrap,
         seed=args.seed,
+        selections=(
+            active_curve_selection_records
+            if args.plot_mode == "antonov_publication"
+            else None
+        ),
+    )
+    failure_plot = plot_failure_intervals(
+        failures,
+        capacity_axis=failure_plot_axis,
     )
     report = build_markdown_report(
         metadata=metadata,
@@ -297,6 +471,9 @@ def run(args: argparse.Namespace) -> Path:
         import_info=imported.info,
         source_test_ids=raw["test_id"].dropna().astype(str).unique().tolist(),
         source_row_count=len(raw),
+        failure_analysis=failure_analysis,
+        curve_selections=plot.selection_records,
+        plotted_curve_points=plot.plotted_points,
     )
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -314,6 +491,15 @@ def run(args: argparse.Namespace) -> Path:
         indicator_aggregation_results.to_csv(index=False), encoding="utf-8-sig"
     )
     (args.out / "failure_summary.csv").write_text(failures.to_csv(index=False), encoding="utf-8")
+    (args.out / "failure_analysis.json").write_text(
+        json.dumps(failure_analysis, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    (args.out / "curve_selections.csv").write_text(
+        pd.DataFrame(plot.selection_records).to_csv(index=False), encoding="utf-8-sig"
+    )
+    (args.out / "plotted_curve_points.csv").write_text(
+        plot.plotted_points.to_csv(index=False), encoding="utf-8-sig"
+    )
     if not moduli.empty:
         (args.out / "moduli.csv").write_text(moduli.to_csv(index=False), encoding="utf-8")
     elif (args.out / "moduli.csv").exists():
@@ -350,6 +536,9 @@ def run(args: argparse.Namespace) -> Path:
         "antonov.svg": export_figure(plot.figure, "svg"),
         "antonov.pdf": export_figure(plot.figure, "pdf"),
         "antonov_600dpi.png": export_figure(plot.figure, "png"),
+        "failure_intervals.svg": export_figure(failure_plot.figure, "svg"),
+        "failure_intervals.pdf": export_figure(failure_plot.figure, "pdf"),
+        "failure_intervals_600dpi.png": export_figure(failure_plot.figure, "png"),
     }
     for name, payload in figures.items():
         (args.out / name).write_bytes(payload)
@@ -361,6 +550,9 @@ def run(args: argparse.Namespace) -> Path:
         report_markdown=report,
         result_tables={
             "failure_summary": failures,
+            "failure_analysis": failure_analysis,
+            "curve_selections": pd.DataFrame(plot.selection_records),
+            "plotted_curve_points": plot.plotted_points,
             "moduli": moduli,
             "pcr": {key: value.to_dict() for key, value in pcr_results.items()},
             "analysis_warnings": analysis_warnings,

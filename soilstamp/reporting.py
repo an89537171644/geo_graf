@@ -190,6 +190,9 @@ def build_markdown_report(
     import_info: dict[str, Any] | None = None,
     source_test_ids: list[str] | None = None,
     source_row_count: int | None = None,
+    failure_analysis: dict[str, Any] | None = None,
+    curve_selections: list[dict[str, Any]] | None = None,
+    plotted_curve_points=None,
 ) -> str:
     load_resolution = float(metadata.get("load_resolution_kN", 0.01))
     pressure_resolution_values = pandas.to_numeric(
@@ -416,55 +419,188 @@ def build_markdown_report(
             )
     else:
         lines.append("- Замечаний в автоматической проверке нет.")
+    lines.extend(["", "## Выбор кривых для публикации", ""])
+    if curve_selections:
+        for decision in curve_selections:
+            group = _modulus_text(decision.get("group"))
+            method = _modulus_text(decision.get("method"))
+            details = []
+            if decision.get("test_id"):
+                details.append(f"test_id=`{decision['test_id']}`")
+            if decision.get("author"):
+                details.append(f"author=`{decision['author']}`")
+            if decision.get("timestamp_utc"):
+                details.append(f"timestamp_utc=`{decision['timestamp_utc']}`")
+            if decision.get("reason"):
+                details.append(f"reason={decision['reason']}")
+            lines.append(
+                f"- `{group}`: method=`{method}`"
+                + ("; " + "; ".join(details) if details else "")
+                + "."
+            )
+    else:
+        lines.append("- Публикационный выбор кривых в этом запуске не применялся.")
+    if plotted_curve_points is not None and len(plotted_curve_points):
+        point_frame = pandas.DataFrame(plotted_curve_points)
+        measured = (
+            int(
+                pandas.to_numeric(point_frame["measured_n"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            if "measured_n" in point_frame
+            else 0
+        )
+        interpolated = (
+            int(
+                pandas.to_numeric(point_frame["interpolated_n"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            if "interpolated_n" in point_frame
+            else 0
+        )
+        lines.append(
+            f"- Сохранено точек графика: {len(point_frame)}; "
+            f"вкладов измеренных={measured}, интерполированных={interpolated}."
+        )
+
     lines.extend(["", "## Разрушение и цензурирование", ""])
-    for _, row in failures.iterrows():
-        if bool(row["failure_reached"]):
-            if pandas.notna(row["F_last_stable"]) and pandas.notna(row["F_failure_step"]):
-                localized_failure = (
-                    f"{format_ru(row['F_last_stable'], resolution=load_resolution)} < Fu ≤ "
-                    f"{format_ru(row['F_failure_step'], resolution=load_resolution, unit='кН')}"
-                )
-                capacity_kind = "force"
-            elif pandas.notna(row.get("p_last_stable")) and pandas.notna(row.get("p_failure_step")):
-                localized_failure = (
-                    f"{format_ru(row['p_last_stable'], resolution=pressure_resolution)} < pu ≤ "
-                    f"{format_ru(row['p_failure_step'], resolution=pressure_resolution, unit='кПа')}"
-                )
-                capacity_kind = "pressure"
-            else:
-                localized_failure = "разрушение зафиксировано; интервал неполон"
-                capacity_kind = "unknown"
-            lines.append(f"- `{row['test_id']}`: {localized_failure}")
-            if capacity_kind == "force":
-                lines.append(
-                    "  - последняя устойчивая нагрузка: "
-                    + format_ru(row["F_last_stable"], resolution=load_resolution, unit="кН")
-                )
-                lines.append(
-                    "  - ступень разрушения: "
-                    + format_ru(row["F_failure_step"], resolution=load_resolution, unit="кН")
-                )
-            elif capacity_kind == "pressure":
-                lines.append(
-                    "  - последнее устойчивое давление: "
-                    + format_ru(row["p_last_stable"], resolution=pressure_resolution, unit="кПа")
-                )
-                lines.append(
-                    "  - давление ступени разрушения: "
-                    + format_ru(row["p_failure_step"], resolution=pressure_resolution, unit="кПа")
-                )
-            if pandas.isna(row["s_failure"]):
-                lines.append("  - осадка при разрушении не измерена; фиктивная точка не создавалась.")
+    analysis_payload = dict(failure_analysis or {})
+    if not analysis_payload:
+        observed = (
+            failures.get("failure_observed", failures.get("failure_reached", pandas.Series(False, index=failures.index)))
+            .fillna(False)
+            .astype(bool)
+        )
+        right = failures.get("right_censored", pandas.Series(False, index=failures.index)).fillna(False).astype(bool)
+        interval = failures.get("interval_censored", observed).fillna(False).astype(bool)
+        analysis_payload = {
+            "contract_version": "failure-analysis/1.0",
+            "summary_method": "none",
+            "point_estimate": None,
+            "n_failure_observed": int(observed.sum()),
+            "n_interval_censored": int(interval.sum()),
+            "n_right_censored": int(right.sum()),
+            "n_indeterminate": int(len(failures) - (interval | right).sum()),
+        }
+    lines.extend(
+        [
+            f"- Контракт: `{analysis_payload.get('contract_version', 'failure-analysis/1.0')}`.",
+            f"- Наблюдавшихся разрушений: {int(analysis_payload.get('n_failure_observed', 0))}.",
+            f"- Интервально цензурированных: {int(analysis_payload.get('n_interval_censored', 0))}.",
+            f"- Правоцензурированных: {int(analysis_payload.get('n_right_censored', 0))}.",
+            f"- Неопределённых, требующих проверки: {int(analysis_payload.get('n_indeterminate', 0))}.",
+            f"- Метод сводной оценки: `{analysis_payload.get('summary_method', 'none')}`.",
+        ]
+    )
+    if analysis_payload.get("point_estimate") is None:
+        lines.append(
+            "- Сводная точечная оценка Fu/pu не рассчитывалась; "
+            "индивидуальные интервалы не усреднялись."
+        )
+    else:
+        lines.append(f"- Сводная точечная оценка: {analysis_payload['point_estimate']}.")
+    lines.extend(
+        [
+            "",
+            "| test_id | тип цензурирования | границы | статус |",
+            "|---|---|---|---|",
+        ]
+    )
+    for _, row in failures.sort_values("test_id", kind="stable").iterrows():
+        kind = _modulus_text(row.get("censoring_type"), "legacy")
+        lower = _finite_float(row.get("lower_bound"))
+        upper = _finite_float(row.get("upper_bound"))
+        unit = _modulus_text(row.get("capacity_unit"), "")
+        if lower is not None and upper is not None:
+            bounds = f"{lower:g} < x ≤ {upper:g} {unit}".strip()
+        elif lower is not None:
+            bounds = f"x > {lower:g} {unit}".strip()
         else:
-            if pandas.notna(row["Fu_lower"]):
-                censor_text = "Fu > " + format_ru(
-                    row["Fu_lower"], resolution=load_resolution, unit="кН"
-                )
+            bounds = "—"
+        status = _modulus_text(row.get("classification_status"), "legacy")
+        lines.append(f"| `{row['test_id']}` | `{kind}` | {bounds} | `{status}` |")
+    lines.append("")
+    for _, row in failures.sort_values("test_id", kind="stable").iterrows():
+        censoring_type = _modulus_text(row.get("censoring_type"), "legacy")
+        capacity_kind = _modulus_text(row.get("capacity_kind"), "unknown")
+        if capacity_kind not in {"force", "pressure"}:
+            capacity_kind = (
+                "pressure"
+                if _finite_float(row.get("pu_lower")) is not None
+                and _finite_float(row.get("Fu_lower")) is None
+                else "force"
+            )
+        lower = _finite_float(row.get("lower_bound"))
+        upper = _finite_float(row.get("upper_bound"))
+        if lower is None:
+            lower = _finite_float(
+                row.get("Fu_lower") if capacity_kind == "force" else row.get("pu_lower")
+            )
+        if upper is None:
+            upper = _finite_float(
+                row.get("Fu_upper") if capacity_kind == "force" else row.get("pu_upper")
+            )
+        resolution = load_resolution if capacity_kind == "force" else pressure_resolution
+        unit = "кН" if capacity_kind == "force" else "кПа"
+        symbol = "Fu" if capacity_kind == "force" else "pu"
+        failure_observed = _modulus_bool(
+            row.get("failure_observed", row.get("failure_reached", False))
+        )
+
+        if censoring_type == "legacy":
+            if failure_observed and lower is not None and upper is not None:
+                censoring_type = "interval_censored"
+            elif not failure_observed and lower is not None:
+                censoring_type = "right_censored"
             else:
-                censor_text = "pu > " + format_ru(
-                    row.get("pu_lower"), resolution=pressure_resolution, unit="кПа"
-                )
-            lines.append(f"- `{row['test_id']}`: {censor_text} (правое цензурирование)")
+                censoring_type = "indeterminate"
+
+        if censoring_type == "interval_censored" and lower is not None and upper is not None:
+            localized_failure = (
+                f"{format_ru(lower, resolution=resolution)} < {symbol} ≤ "
+                f"{format_ru(upper, resolution=resolution, unit=unit)}"
+            )
+            lines.append(f"- `{row['test_id']}`: {localized_failure}")
+            stable_label = (
+                "последняя устойчивая нагрузка"
+                if capacity_kind == "force"
+                else "последнее устойчивое давление"
+            )
+            failure_label = (
+                "ступень разрушения"
+                if capacity_kind == "force"
+                else "давление ступени разрушения"
+            )
+            lines.append(
+                f"  - {stable_label}: "
+                + format_ru(lower, resolution=resolution, unit=unit)
+            )
+            lines.append(
+                f"  - {failure_label}: "
+                + format_ru(upper, resolution=resolution, unit=unit)
+            )
+        elif censoring_type == "right_censored" and lower is not None:
+            censor_text = f"{symbol} > " + format_ru(
+                lower, resolution=resolution, unit=unit
+            )
+            lines.append(
+                f"- `{row['test_id']}`: {censor_text} (правое цензурирование)"
+            )
+        else:
+            lines.append(
+                f"- `{row['test_id']}`: границы Fu/pu не определены; "
+                "требуется инженерная проверка (indeterminate)."
+            )
+            warning = _modulus_text(row.get("classification_warning"), "")
+            if warning:
+                lines.append(f"  - предупреждение классификации: `{warning}`.")
+
+        if failure_observed and pandas.isna(row.get("s_failure")):
+            lines.append(
+                "  - осадка при разрушении не измерена; фиктивная точка не создавалась."
+            )
     if pcr_results:
         lines.extend(["", "## Начальное критическое давление", ""])
         for test_id, result in pcr_results.items():

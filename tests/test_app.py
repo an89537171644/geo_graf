@@ -80,6 +80,42 @@ def test_streamlit_user_csv_path_has_no_exceptions() -> None:
     )
 
 
+def test_streamlit_singleton_subset_does_not_reuse_metadata_mean_decision() -> None:
+    app = _user_upload_app(
+        "demo_protocol.csv",
+        (ROOT / "examples" / "demo_protocol.csv").read_bytes(),
+        "text/csv",
+    )
+    tests = next(item for item in app.sidebar.multiselect if item.label == "Испытания")
+    tests.set_value(["B-01"])
+    app.run(timeout=120)
+    graph_mode = next(item for item in app.selectbox if item.label == "Режим")
+    graph_mode.set_value("antonov_publication")
+    app.run(timeout=120)
+
+    assert not app.exception
+    assert any(
+        "индивидуальная B-01" in str(item.value)
+        for item in app.caption
+    )
+
+
+def test_streamlit_metadata_curve_selection_survives_same_context_rerun() -> None:
+    app = _user_upload_app(
+        "demo_protocol.csv",
+        (ROOT / "examples" / "demo_protocol.csv").read_bytes(),
+        "text/csv",
+    )
+    graph_mode = next(item for item in app.selectbox if item.label == "Режим")
+    graph_mode.set_value("antonov_publication")
+    app.run(timeout=120)
+    bootstrap = next(item for item in app.number_input if item.label == "Bootstrap")
+    bootstrap.set_value(400)
+    app.run(timeout=120)
+
+    assert not app.exception
+
+
 def test_streamlit_user_strict_xlsx_path_has_no_exceptions() -> None:
     app = _user_upload_app(
         "demo_protocol.xlsx",

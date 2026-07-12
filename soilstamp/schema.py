@@ -310,6 +310,19 @@ class FailureResult:
     s_last_stable: float | None
     s_failure: float | None
     display: str
+    failure_observed: bool = False
+    interval_censored: bool = False
+    censoring_type: str = "indeterminate"
+    classification_status: str = "review_required"
+    classification_warning: str | None = None
+    capacity_kind: str = "unknown"
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    capacity_unit: str | None = None
+    lower_inclusive: bool = False
+    upper_inclusive: bool | None = None
+    failure_sequence_no: int | float | str | None = None
+    last_stable_sequence_no: int | float | str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

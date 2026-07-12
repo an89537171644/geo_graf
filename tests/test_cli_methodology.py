@@ -9,7 +9,12 @@ import pandas as pd
 import pytest
 
 from soilstamp.analysis import calculate_moduli_for_test
-from soilstamp.cli import build_parser, run
+from soilstamp.cli import (
+    _curve_selection_records,
+    _scope_curve_selection_records,
+    build_parser,
+    run,
+)
 from soilstamp.methodology import ModulusOverrides
 
 
@@ -33,6 +38,9 @@ def single_test_demo(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Pa
         (ROOT / "examples" / "demo_metadata.json").read_text(encoding="utf-8")
     )
     metadata_payload["tests"] = {"B-01": metadata_payload["tests"]["B-01"]}
+    metadata_payload["publication_curve_selection"]["decisions"] = [
+        {"group": "baseline", "method": "mean_curve"}
+    ]
     metadata = work / "metadata.json"
     metadata.write_text(
         json.dumps(metadata_payload, ensure_ascii=False, indent=2),
@@ -58,6 +66,55 @@ def test_parser_accepts_method_profile_range_and_source_flags() -> None:
     assert args.method_profile == "antonov_round_stamp_v1"
     assert args.e_range == (0.0, 200.0)
     assert args.e_range_source == "explicit"
+
+
+def test_cli_loads_versioned_curve_selections_without_inference(tmp_path: Path) -> None:
+    metadata = {
+        "publication_curve_selection": {
+            "contract_version": "publication-curve-selection/1.0",
+            "decisions": [{"group": "baseline", "method": "mean_curve"}],
+        }
+    }
+    assert _curve_selection_records(metadata, None) == [
+        {"group": "baseline", "method": "mean_curve"}
+    ]
+
+    override = tmp_path / "selections.json"
+    override.write_text(
+        json.dumps(
+            {
+                "contract_version": "publication-curve-selection/1.0",
+                "decisions": [
+                    {"group": "baseline", "method": "individual_curves"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert _curve_selection_records(metadata, override)[0]["method"] == "individual_curves"
+
+
+def test_cli_scopes_aggregate_decisions_to_repeats_and_rejects_unknown_groups() -> None:
+    singleton = pd.DataFrame({"test_id": ["T1"], "group": ["baseline"]})
+    assert _scope_curve_selection_records(
+        singleton, [{"group": "baseline", "method": "mean_curve"}]
+    ) == []
+    assert _scope_curve_selection_records(
+        singleton,
+        [{"group": "reinforced", "method": "mean_curve"}],
+        known_groups={"baseline", "reinforced"},
+    ) == []
+
+    repeated = pd.DataFrame(
+        {"test_id": ["T1", "T2"], "group": ["baseline", "baseline"]}
+    )
+    decision = {"group": "baseline", "method": "mean_curve"}
+    assert _scope_curve_selection_records(repeated, [decision]) == [decision]
+
+    with pytest.raises(ValueError, match="отсутствующих групп"):
+        _scope_curve_selection_records(
+            repeated, [{"group": "typo", "method": "mean_curve"}]
+        )
 
 
 @pytest.mark.parametrize("raw_range", ["not-a-range", "200:0", "0:zero"])
@@ -99,6 +156,17 @@ def test_cli_approved_antonov_matches_direct_api_with_provenance(
     bundle = run(args)
     assert bundle.is_file()
     assert (output / "indicator_aggregation_results.csv").is_file()
+    assert (output / "curve_selections.csv").is_file()
+    assert (output / "plotted_curve_points.csv").is_file()
+    assert (output / "failure_intervals.svg").is_file()
+    failure_analysis = json.loads(
+        (output / "failure_analysis.json").read_text(encoding="utf-8")
+    )
+    assert failure_analysis["contract_version"] == "failure-analysis/1.0"
+    assert failure_analysis["summary_method"] == "none"
+    assert failure_analysis["point_estimate"] is None
+    selections = pd.read_csv(output / "curve_selections.csv")
+    assert selections["method"].tolist() == ["individual_curves"]
     provenance = json.loads((output / "provenance.json").read_text(encoding="utf-8"))
     assert "metrology_evaluations" in provenance
     cli_table = pd.read_csv(output / "moduli.csv")

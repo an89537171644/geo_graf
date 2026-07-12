@@ -27,12 +27,18 @@ REQUIRED_ARTIFACTS = (
     "prepared.csv",
     "indicator_aggregation_results.csv",
     "failure_summary.csv",
+    "failure_analysis.json",
+    "curve_selections.csv",
+    "plotted_curve_points.csv",
     "pcr.json",
     "moduli.csv",
     "report_ru.md",
     "antonov.svg",
     "antonov.pdf",
     "antonov_600dpi.png",
+    "failure_intervals.svg",
+    "failure_intervals.pdf",
+    "failure_intervals_600dpi.png",
     "reproducibility.zip",
 )
 
@@ -47,7 +53,30 @@ REQUIRED_CSV_COLUMNS = {
         "missing_channels",
         "aggregation_status",
     },
-    "failure_summary.csv": {"test_id", "failure_reached"},
+    "failure_summary.csv": {
+        "test_id",
+        "failure_reached",
+        "failure_observed",
+        "interval_censored",
+        "right_censored",
+        "censoring_type",
+        "classification_status",
+        "lower_bound",
+        "upper_bound",
+    },
+    "curve_selections.csv": {"group", "method"},
+    "plotted_curve_points.csv": {
+        "group",
+        "curve_number",
+        "selection_method",
+        "axis_mode",
+        "x",
+        "y",
+        "n",
+        "measured_n",
+        "interpolated_n",
+        "draw_marker",
+    },
     "moduli.csv": {
         "test_id",
         "method",
@@ -80,12 +109,18 @@ ZIP_EXTERNAL_COPIES = {
     "data/prepared_machine.csv": "prepared.csv",
     "results/indicator_aggregation_results.csv": "indicator_aggregation_results.csv",
     "results/failure_summary.csv": "failure_summary.csv",
+    "results/failure_analysis.json": "failure_analysis.json",
+    "results/curve_selections.csv": "curve_selections.csv",
+    "results/plotted_curve_points.csv": "plotted_curve_points.csv",
     "results/pcr.json": "pcr.json",
     "results/moduli.csv": "moduli.csv",
     "report_ru.md": "report_ru.md",
     "figures/antonov.svg": "antonov.svg",
     "figures/antonov.pdf": "antonov.pdf",
     "figures/antonov_600dpi.png": "antonov_600dpi.png",
+    "figures/failure_intervals.svg": "failure_intervals.svg",
+    "figures/failure_intervals.pdf": "failure_intervals.pdf",
+    "figures/failure_intervals_600dpi.png": "failure_intervals_600dpi.png",
 }
 
 TEXT_ARTIFACT_SUFFIXES = {".csv", ".json", ".md"}
@@ -130,11 +165,93 @@ def _check_csv(
 
     if not rows:
         problems.append(f"{path.name} has no data rows")
-    elif "test_id" in columns and not any((row.get("test_id") or "").strip() for row in rows):
+    elif (
+        "test_id" in required_columns
+        and not any((row.get("test_id") or "").strip() for row in rows)
+    ):
         problems.append(f"{path.name} has no non-empty test_id")
     if any(None in row for row in rows):
         problems.append(f"{path.name} has rows wider than its header")
     return columns, rows
+
+
+def _check_curve_selection_rows(
+    rows: list[dict[str | None, str | list[str] | None]],
+    problems: list[str],
+) -> None:
+    allowed = {
+        "mean_curve",
+        "median_curve",
+        "manual_representative",
+        "individual_curves",
+    }
+    for row_number, row in enumerate(rows, start=2):
+        group = str(row.get("group") or "").strip()
+        method = str(row.get("method") or "").strip()
+        if not group:
+            problems.append(f"curve_selections.csv row {row_number} has no group")
+        if method not in allowed:
+            problems.append(
+                f"curve_selections.csv row {row_number} has unsupported method {method!r}"
+            )
+        if method == "manual_representative":
+            missing = [
+                field
+                for field in ("test_id", "author", "timestamp_utc", "reason")
+                if not str(row.get(field) or "").strip()
+            ]
+            if missing:
+                problems.append(
+                    f"curve_selections.csv row {row_number} manual choice is missing: "
+                    + ", ".join(missing)
+                )
+
+
+def _csv_finite_float(value: object) -> float | None:
+    try:
+        number = float(str(value or "").strip())
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _check_failure_rows(
+    rows: list[dict[str | None, str | list[str] | None]],
+    problems: list[str],
+) -> None:
+    allowed_types = {"interval_censored", "right_censored", "indeterminate"}
+    for row_number, row in enumerate(rows, start=2):
+        label = f"failure_summary.csv row {row_number}"
+        kind = str(row.get("censoring_type") or "").strip()
+        observed = _parse_csv_bool(row.get("failure_observed"))
+        interval = _parse_csv_bool(row.get("interval_censored"))
+        right = _parse_csv_bool(row.get("right_censored"))
+        lower = _csv_finite_float(row.get("lower_bound"))
+        upper = _csv_finite_float(row.get("upper_bound"))
+        status = str(row.get("classification_status") or "").strip()
+        if kind not in allowed_types:
+            problems.append(f"{label} has unsupported censoring_type {kind!r}")
+        if interval is None or right is None or observed is None:
+            problems.append(f"{label} has an invalid censoring boolean")
+            continue
+        if interval != (kind == "interval_censored"):
+            problems.append(f"{label} interval_censored disagrees with censoring_type")
+        if right != (kind == "right_censored"):
+            problems.append(f"{label} right_censored disagrees with censoring_type")
+        if kind == "interval_censored":
+            if not observed:
+                problems.append(f"{label} interval-censored event is not observed")
+            if lower is None or upper is None or not lower < upper:
+                problems.append(f"{label} has invalid interval bounds")
+        elif kind == "right_censored":
+            if observed:
+                problems.append(f"{label} right-censored event is marked observed")
+            if lower is None or upper is not None:
+                problems.append(f"{label} has invalid right-censoring bounds")
+        elif kind == "indeterminate" and status != "review_required":
+            problems.append(f"{label} indeterminate state must require review")
+        if status not in {"ok", "review_required"}:
+            problems.append(f"{label} has invalid classification_status {status!r}")
 
 
 def _parse_csv_bool(value: object) -> bool | None:
@@ -255,6 +372,107 @@ def _check_pcr(path: Path, problems: list[str]) -> None:
             problems.append(f"pcr.json result {test_id!r} has invalid pcr_auto")
 
 
+def _check_failure_analysis(path: Path, problems: list[str]) -> dict[str, object] | None:
+    payload = _load_json(path, problems)
+    if not isinstance(payload, dict):
+        problems.append("failure_analysis.json must contain an object")
+        return None
+    if payload.get("contract_version") != "failure-analysis/1.0":
+        problems.append("failure_analysis.json has unsupported contract_version")
+    if payload.get("summary_method") != "none":
+        problems.append("failure_analysis.json summary_method must be none")
+    if payload.get("point_estimate") is not None:
+        problems.append("failure_analysis.json must not contain an implicit point estimate")
+    for field in (
+        "n_tests",
+        "n_failure_observed",
+        "n_interval_censored",
+        "n_right_censored",
+        "n_indeterminate",
+    ):
+        value = payload.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            problems.append(f"failure_analysis.json has invalid {field}")
+    return payload
+
+
+def _check_failure_count_consistency(
+    analysis: dict[str, object],
+    rows: list[dict[str | None, str | list[str] | None]],
+    problems: list[str],
+) -> None:
+    censoring = [str(row.get("censoring_type") or "indeterminate").strip() for row in rows]
+    observed = [_parse_csv_bool(row.get("failure_observed")) for row in rows]
+    expected = {
+        "n_tests": len(rows),
+        "n_failure_observed": sum(value is True for value in observed),
+        "n_interval_censored": sum(value == "interval_censored" for value in censoring),
+        "n_right_censored": sum(value == "right_censored" for value in censoring),
+        "n_indeterminate": sum(value == "indeterminate" for value in censoring),
+    }
+    for field, value in expected.items():
+        if analysis.get(field) != value:
+            problems.append(
+                f"failure_analysis.json {field}={analysis.get(field)!r} "
+                f"does not match failure_summary.csv ({value})"
+            )
+    for row_number, (kind, is_observed) in enumerate(
+        zip(censoring, observed, strict=True), start=2
+    ):
+        if is_observed is None:
+            problems.append(
+                f"failure_summary.csv row {row_number} has invalid failure_observed boolean"
+            )
+        if kind == "interval_censored" and is_observed is not True:
+            problems.append(
+                f"failure_summary.csv row {row_number} is interval-censored without observed failure"
+            )
+
+
+def _check_plotted_point_rows(
+    rows: list[dict[str | None, str | list[str] | None]],
+    selections: list[dict[str | None, str | list[str] | None]],
+    problems: list[str],
+) -> None:
+    selection_by_group = {
+        str(row.get("group") or "").strip(): str(row.get("method") or "").strip()
+        for row in selections
+    }
+    for row_number, row in enumerate(rows, start=2):
+        label = f"plotted_curve_points.csv row {row_number}"
+        for field in ("x", "y"):
+            try:
+                value = float(str(row.get(field) or "").strip())
+            except ValueError:
+                value = float("nan")
+            if not math.isfinite(value):
+                problems.append(f"{label} has non-finite {field}")
+        counts: dict[str, int] = {}
+        for field in ("n", "measured_n", "interpolated_n"):
+            text = str(row.get(field) or "").strip()
+            try:
+                value = int(text)
+            except ValueError:
+                value = -1
+            if value < 0 or text != str(value):
+                problems.append(f"{label} has invalid integer {field}")
+            counts[field] = value
+        if counts["measured_n"] + counts["interpolated_n"] != counts["n"]:
+            problems.append(f"{label} violates measured_n + interpolated_n = n")
+        marker = _parse_csv_bool(row.get("draw_marker"))
+        if marker is None:
+            problems.append(f"{label} has invalid draw_marker boolean")
+        elif marker != (counts["interpolated_n"] == 0):
+            problems.append(f"{label} draw_marker disagrees with interpolated_n")
+        group = str(row.get("group") or "").strip()
+        method = str(row.get("selection_method") or "").strip()
+        expected_method = selection_by_group.get(group)
+        if expected_method is not None and method != expected_method:
+            problems.append(
+                f"{label} method {method!r} disagrees with curve selection {expected_method!r}"
+            )
+
+
 def _check_report(path: Path, problems: list[str]) -> None:
     try:
         text = path.read_text(encoding="utf-8")
@@ -271,10 +489,10 @@ def _check_svg(path: Path, problems: list[str]) -> None:
     try:
         root = ElementTree.fromstring(path.read_bytes())
     except (OSError, ElementTree.ParseError) as exc:
-        problems.append(f"antonov.svg is not valid XML: {exc}")
+        problems.append(f"{path.name} is not valid XML: {exc}")
         return
     if root.tag.rsplit("}", 1)[-1].lower() != "svg":
-        problems.append("antonov.svg root element is not <svg>")
+        problems.append(f"{path.name} root element is not <svg>")
 
 
 def _check_pdf(path: Path, problems: list[str]) -> None:
@@ -282,9 +500,9 @@ def _check_pdf(path: Path, problems: list[str]) -> None:
     if payload is None:
         return
     if not payload.startswith(b"%PDF-"):
-        problems.append("antonov.pdf has no PDF signature")
+        problems.append(f"{path.name} has no PDF signature")
     if b"%%EOF" not in payload[-1024:]:
-        problems.append("antonov.pdf has no PDF end marker")
+        problems.append(f"{path.name} has no PDF end marker")
 
 
 def _check_png(path: Path, problems: list[str]) -> None:
@@ -293,14 +511,14 @@ def _check_png(path: Path, problems: list[str]) -> None:
         return
     signature = b"\x89PNG\r\n\x1a\n"
     if len(payload) < 24 or not payload.startswith(signature):
-        problems.append("antonov_600dpi.png has no valid PNG header")
+        problems.append(f"{path.name} has no valid PNG header")
         return
     if payload[12:16] != b"IHDR":
-        problems.append("antonov_600dpi.png does not start with an IHDR chunk")
+        problems.append(f"{path.name} does not start with an IHDR chunk")
         return
     width, height = struct.unpack(">II", payload[16:24])
     if width == 0 or height == 0:
-        problems.append("antonov_600dpi.png has invalid dimensions")
+        problems.append(f"{path.name} has invalid dimensions")
 
 
 def _safe_zip_name(name: str) -> bool:
@@ -362,7 +580,12 @@ def _check_zip(path: Path, output_dir: Path, problems: list[str]) -> None:
             if corrupt is not None:
                 problems.append(f"reproducibility.zip has a corrupt member: {corrupt}")
 
-            required = set(ZIP_EXTERNAL_COPIES) | {"manifest.json"}
+            required = set(ZIP_EXTERNAL_COPIES) | {
+                "manifest.json",
+                "audit.json",
+                "provenance.json",
+                "analysis_run.json",
+            }
             missing = sorted(required - name_set)
             if missing:
                 problems.append(
@@ -451,28 +674,61 @@ def verify_demo_artifacts(output_dir: str | Path) -> None:
         elif path.stat().st_size == 0:
             problems.append(f"required artifact is empty: {name}")
 
+    csv_rows: dict[
+        str, list[dict[str | None, str | list[str] | None]]
+    ] = {}
     for name, required_columns in REQUIRED_CSV_COLUMNS.items():
         path = directory / name
         if path.is_file() and path.stat().st_size:
             csv_result = _check_csv(path, required_columns, problems)
+            if csv_result is not None:
+                _, rows = csv_result
+                csv_rows[name] = rows
             if name == "moduli.csv" and csv_result is not None:
                 columns, rows = csv_result
                 _check_moduli_rows(columns, rows, problems)
+            if name == "curve_selections.csv" and csv_result is not None:
+                _, rows = csv_result
+                _check_curve_selection_rows(rows, problems)
+            if name == "failure_summary.csv" and csv_result is not None:
+                _, rows = csv_result
+                _check_failure_rows(rows, problems)
     pcr_path = directory / "pcr.json"
     if pcr_path.is_file() and pcr_path.stat().st_size:
         _check_pcr(pcr_path, problems)
+    failure_analysis_path = directory / "failure_analysis.json"
+    failure_analysis_payload = None
+    if failure_analysis_path.is_file() and failure_analysis_path.stat().st_size:
+        failure_analysis_payload = _check_failure_analysis(
+            failure_analysis_path, problems
+        )
+    if failure_analysis_payload is not None and "failure_summary.csv" in csv_rows:
+        _check_failure_count_consistency(
+            failure_analysis_payload,
+            csv_rows["failure_summary.csv"],
+            problems,
+        )
+    if "plotted_curve_points.csv" in csv_rows and "curve_selections.csv" in csv_rows:
+        _check_plotted_point_rows(
+            csv_rows["plotted_curve_points.csv"],
+            csv_rows["curve_selections.csv"],
+            problems,
+        )
     report_path = directory / "report_ru.md"
     if report_path.is_file() and report_path.stat().st_size:
         _check_report(report_path, problems)
-    svg_path = directory / "antonov.svg"
-    if svg_path.is_file() and svg_path.stat().st_size:
-        _check_svg(svg_path, problems)
-    pdf_path = directory / "antonov.pdf"
-    if pdf_path.is_file() and pdf_path.stat().st_size:
-        _check_pdf(pdf_path, problems)
-    png_path = directory / "antonov_600dpi.png"
-    if png_path.is_file() and png_path.stat().st_size:
-        _check_png(png_path, problems)
+    for name in ("antonov.svg", "failure_intervals.svg"):
+        path = directory / name
+        if path.is_file() and path.stat().st_size:
+            _check_svg(path, problems)
+    for name in ("antonov.pdf", "failure_intervals.pdf"):
+        path = directory / name
+        if path.is_file() and path.stat().st_size:
+            _check_pdf(path, problems)
+    for name in ("antonov_600dpi.png", "failure_intervals_600dpi.png"):
+        path = directory / name
+        if path.is_file() and path.stat().st_size:
+            _check_png(path, problems)
     zip_path = directory / "reproducibility.zip"
     if zip_path.is_file() and zip_path.stat().st_size:
         _check_zip(zip_path, directory, problems)

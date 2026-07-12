@@ -34,7 +34,31 @@ def _artifact_payloads() -> dict[str, bytes]:
             "DEMO-01,1,0.20,10.0,31.83\n"
         ).encode(),
         "failure_summary.csv": (
-            "test_id,failure_reached,F_last_stable\nDEMO-01,False,10.0\n"
+            "test_id,failure_reached,failure_observed,interval_censored,right_censored,"
+            "censoring_type,classification_status,lower_bound,upper_bound,F_last_stable\n"
+            "DEMO-01,False,False,False,True,right_censored,ok,10.0,,10.0\n"
+        ).encode(),
+        "failure_analysis.json": json.dumps(
+            {
+                "contract_version": "failure-analysis/1.0",
+                "summary_method": "none",
+                "point_estimate": None,
+                "n_tests": 1,
+                "n_failure_observed": 0,
+                "n_interval_censored": 0,
+                "n_right_censored": 1,
+                "n_indeterminate": 0,
+            },
+            indent=2,
+        ).encode(),
+        "curve_selections.csv": (
+            "group,method,test_id,author,timestamp_utc,reason\n"
+            "baseline,mean_curve,,,,\n"
+        ).encode(),
+        "plotted_curve_points.csv": (
+            "group,curve_number,selection_method,axis_mode,x,y,n,measured_n,"
+            "interpolated_n,draw_marker\n"
+            "baseline,1,mean_curve,p-s,31.83,0.20,1,1,0,True\n"
         ).encode(),
         "pcr.json": json.dumps(
             {
@@ -64,6 +88,11 @@ def _artifact_payloads() -> dict[str, bytes]:
         "antonov.svg": b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>',
         "antonov.pdf": b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n",
         "antonov_600dpi.png": _png(),
+        "failure_intervals.svg": (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
+        ),
+        "failure_intervals.pdf": b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n",
+        "failure_intervals_600dpi.png": _png(),
     }
 
 
@@ -85,12 +114,23 @@ def _write_demo_artifacts(
             "indicator_aggregation_results.csv"
         ],
         "results/failure_summary.csv": payloads["failure_summary.csv"],
+        "results/failure_analysis.json": payloads["failure_analysis.json"],
+        "results/curve_selections.csv": payloads["curve_selections.csv"],
+        "results/plotted_curve_points.csv": payloads["plotted_curve_points.csv"],
         "results/pcr.json": payloads["pcr.json"],
         "results/moduli.csv": payloads["moduli.csv"],
         "report_ru.md": payloads["report_ru.md"],
         "figures/antonov.svg": payloads["antonov.svg"],
         "figures/antonov.pdf": payloads["antonov.pdf"],
         "figures/antonov_600dpi.png": payloads["antonov_600dpi.png"],
+        "figures/failure_intervals.svg": payloads["failure_intervals.svg"],
+        "figures/failure_intervals.pdf": payloads["failure_intervals.pdf"],
+        "figures/failure_intervals_600dpi.png": payloads[
+            "failure_intervals_600dpi.png"
+        ],
+        "audit.json": b"[]\n",
+        "provenance.json": b'{"program_version":"test"}\n',
+        "analysis_run.json": b'{"parameters":{},"software":{}}\n',
     }
     zip_payloads.update(zip_overrides or {})
     manifest = {
@@ -169,6 +209,71 @@ def test_verify_demo_artifacts_requires_modulus_method_contract(tmp_path: Path) 
     assert "used_indices" in message
 
 
+def test_verify_demo_artifacts_rejects_implicit_failure_point_estimate(
+    tmp_path: Path,
+) -> None:
+    invalid = json.loads(_artifact_payloads()["failure_analysis.json"])
+    invalid["summary_method"] = "midpoint_mean"
+    invalid["point_estimate"] = 125.0
+    _write_demo_artifacts(
+        tmp_path,
+        artifact_overrides={
+            "failure_analysis.json": json.dumps(invalid).encode("utf-8")
+        },
+    )
+
+    with pytest.raises(ArtifactVerificationError) as caught:
+        verify_demo_artifacts(tmp_path)
+
+    assert "summary_method must be none" in str(caught.value)
+    assert "must not contain an implicit point estimate" in str(caught.value)
+
+
+def test_verify_demo_artifacts_rejects_inconsistent_failure_and_plot_points(
+    tmp_path: Path,
+) -> None:
+    invalid_failure = (
+        "test_id,failure_reached,failure_observed,interval_censored,right_censored,"
+        "censoring_type,classification_status,lower_bound,upper_bound,F_last_stable\n"
+        "DEMO-01,True,True,True,True,right_censored,ok,20.0,10.0,20.0\n"
+    ).encode()
+    invalid_points = (
+        "group,curve_number,selection_method,axis_mode,x,y,n,measured_n,"
+        "interpolated_n,draw_marker\n"
+        "baseline,1,median_curve,p-s,garbage,nan,-7,5,9,True\n"
+    ).encode()
+    invalid_analysis = json.dumps(
+        {
+            "contract_version": "failure-analysis/1.0",
+            "summary_method": "none",
+            "point_estimate": None,
+            "n_tests": 1,
+            "n_failure_observed": 1,
+            "n_interval_censored": 0,
+            "n_right_censored": 1,
+            "n_indeterminate": 0,
+        }
+    ).encode()
+    _write_demo_artifacts(
+        tmp_path,
+        artifact_overrides={
+            "failure_summary.csv": invalid_failure,
+            "failure_analysis.json": invalid_analysis,
+            "plotted_curve_points.csv": invalid_points,
+        },
+    )
+
+    with pytest.raises(ArtifactVerificationError) as caught:
+        verify_demo_artifacts(tmp_path)
+
+    message = str(caught.value)
+    assert "right-censored event is marked observed" in message
+    assert "invalid right-censoring bounds" in message
+    assert "non-finite x" in message
+    assert "violates measured_n + interpolated_n = n" in message
+    assert "disagrees with curve selection" in message
+
+
 def test_verify_demo_artifacts_rejects_invalid_primary_modulus(tmp_path: Path) -> None:
     invalid_moduli = (
         "test_id,method,E_stamp_app_kPa,profile_id,profile_version,is_primary,"
@@ -215,7 +320,13 @@ def test_verify_demo_artifacts_script_is_cross_platform_cli(tmp_path: Path) -> N
     # On Windows, pandas CRLF passed through Path.write_text can become CRCRLF.
     # The archive still contains LF, so the verifier must compare CSV records
     # rather than platform-specific newline bytes.
-    for name in ("prepared.csv", "failure_summary.csv", "moduli.csv"):
+    for name in (
+        "prepared.csv",
+        "failure_summary.csv",
+        "curve_selections.csv",
+        "plotted_curve_points.csv",
+        "moduli.csv",
+    ):
         path = tmp_path / name
         path.write_bytes(path.read_bytes().replace(b"\n", b"\r\r\n"))
     script = Path(__file__).parents[1] / "scripts" / "verify_demo_artifacts.py"

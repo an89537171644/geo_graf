@@ -6,6 +6,7 @@ import pytest
 from scipy import stats
 
 from soilstamp.analysis import (
+    aggregate_group_curve,
     compare_groups,
     confirm_manual_pcr,
     center_and_tilt,
@@ -127,15 +128,142 @@ def test_group_interpolation_is_inside_range_and_flagged() -> None:
     assert mean["p_kPa"].min() >= 0.0 and mean["p_kPa"].max() <= 200.0
 
 
-def test_group_union_keeps_tails_and_actual_n() -> None:
+def test_group_mean_uses_only_common_pressure_support() -> None:
     long_curve = _prepared_curve(
         "T1", np.array([0.0, 100.0, 200.0]), np.array([0.0, 1.0, 2.0])
     )
     short_curve = _prepared_curve("T2", np.array([100.0]), np.array([1.2]))
     mean = group_mean_curve(pd.concat([long_curve, short_curve], ignore_index=True), bootstrap=30)
-    assert mean["p_kPa"].tolist() == [0.0, 100.0, 200.0]
-    assert mean["n"].tolist() == [1, 2, 1]
-    assert mean["measured_n"].tolist() == [1, 2, 1]
+    assert mean["p_kPa"].tolist() == [100.0]
+    assert mean["n"].tolist() == [2]
+    assert mean["measured_n"].tolist() == [2]
+
+
+def test_coordinate_aggregation_is_test_id_order_invariant_including_bootstrap() -> None:
+    frame = pd.concat(
+        [
+            _prepared_curve("T2", np.array([0.0, 100.0, 200.0]), np.array([0.0, 3.0, 4.0])),
+            _prepared_curve("T1", np.array([0.0, 100.0, 200.0]), np.array([0.0, 1.0, 4.0])),
+            _prepared_curve("T3", np.array([0.0, 100.0, 200.0]), np.array([0.0, 6.0, 10.0])),
+        ],
+        ignore_index=True,
+    )
+    reordered = pd.concat(
+        [
+            frame[frame["test_id"].eq("T3")],
+            frame[frame["test_id"].eq("T2")],
+            frame[frame["test_id"].eq("T1")],
+        ],
+        ignore_index=True,
+    )
+
+    first = aggregate_group_curve(frame, bootstrap=80, seed=7)
+    second = aggregate_group_curve(reordered, bootstrap=80, seed=7)
+
+    pd.testing.assert_frame_equal(first, second)
+    assert first["source_test_ids"].unique().tolist() == ["T1,T2,T3"]
+    assert first["bootstrap_ci_low"].notna().all()
+
+
+def test_f_s_aggregation_accepts_repeats_with_identical_geometry() -> None:
+    first = _prepared_curve(
+        "T1", np.array([0.0, 100.0, 200.0]), np.array([0.0, 1.0, 2.0])
+    )
+    second = _prepared_curve(
+        "T2", np.array([100.0, 200.0, 300.0]), np.array([1.4, 2.4, 3.4])
+    )
+
+    result = aggregate_group_curve(
+        pd.concat([first, second], ignore_index=True),
+        axis_mode="F-s",
+        statistic="mean",
+        bootstrap=30,
+    )
+
+    area = np.pi * 0.3**2 / 4.0
+    assert result["F_kN"].tolist() == pytest.approx([100.0 * area, 200.0 * area])
+    assert result["n"].tolist() == [2, 2]
+    assert result["y"].tolist() == pytest.approx([1.2, 2.2])
+
+
+def test_f_s_aggregation_rejects_different_stamp_diameters() -> None:
+    first = _prepared_curve("T1", np.array([0.0, 100.0]), np.array([0.0, 1.0]))
+    second = _prepared_curve("T2", np.array([0.0, 100.0]), np.array([0.0, 1.5]))
+    second = second.assign(D_mm=500.0)
+
+    with pytest.raises(ValueError, match="одинаковых диаметра и площади"):
+        aggregate_group_curve(
+            pd.concat([first, second], ignore_index=True),
+            axis_mode="F-s",
+            bootstrap=20,
+        )
+
+
+def test_p_s_over_d_normalizes_each_curve_before_aggregation_inside_support() -> None:
+    first = _prepared_curve(
+        "T1", np.array([0.0, 100.0, 200.0]), np.array([0.0, 10.0, 20.0])
+    ).assign(D_mm=100.0)
+    second = _prepared_curve(
+        "T2", np.array([100.0, 200.0]), np.array([30.0, 50.0])
+    ).assign(D_mm=200.0)
+
+    result = aggregate_group_curve(
+        pd.concat([first, second], ignore_index=True),
+        axis_mode="p-s/D",
+        statistic="mean",
+        bootstrap=30,
+    )
+
+    assert result["p_kPa"].tolist() == [0.0, 100.0, 200.0]
+    at_zero = result.loc[np.isclose(result["p_kPa"], 0.0)].iloc[0]
+    at_100 = result.loc[np.isclose(result["p_kPa"], 100.0)].iloc[0]
+    assert at_zero["n"] == 1
+    assert at_zero["y"] == pytest.approx(0.0)
+    assert at_100["n"] == 2
+    assert at_100["y"] == pytest.approx(np.mean([10.0 / 100.0, 30.0 / 200.0]))
+    assert result["y_quantity"].unique().tolist() == ["settlement_over_d"]
+    assert result["mean_settlement_mm"].isna().all()
+    assert result["t_ci_low_mm"].isna().all()
+    assert result["bootstrap_ci_low_mm"].isna().all()
+
+
+def test_coordinate_aggregation_marks_only_fully_measured_levels() -> None:
+    detailed = _prepared_curve(
+        "T1", np.array([0.0, 100.0, 200.0]), np.array([0.0, 1.0, 2.0])
+    )
+    sparse = _prepared_curve("T2", np.array([0.0, 200.0]), np.array([0.0, 2.0]))
+
+    result = aggregate_group_curve(
+        pd.concat([detailed, sparse], ignore_index=True),
+        axis_mode="p-s",
+        bootstrap=30,
+    )
+
+    middle = result.loc[np.isclose(result["p_kPa"], 100.0)].iloc[0]
+    assert middle["n"] == 2
+    assert middle["measured_n"] == 1
+    assert middle["interpolated_n"] == 1
+    assert not bool(middle["draw_marker"])
+    assert result.loc[~np.isclose(result["p_kPa"], 100.0), "draw_marker"].all()
+
+
+def test_coordinate_aggregation_supports_median() -> None:
+    frame = pd.concat(
+        [
+            _prepared_curve("T1", np.array([0.0, 100.0]), np.array([0.0, 1.0])),
+            _prepared_curve("T2", np.array([0.0, 100.0]), np.array([10.0, 11.0])),
+            _prepared_curve("T3", np.array([0.0, 100.0]), np.array([100.0, 101.0])),
+        ],
+        ignore_index=True,
+    )
+
+    result = aggregate_group_curve(frame, statistic="median", bootstrap=50, seed=4)
+
+    assert result["statistic"].unique().tolist() == ["median"]
+    assert result["y"].tolist() == pytest.approx([10.0, 11.0])
+    assert result["median_settlement"].tolist() == pytest.approx([10.0, 11.0])
+    assert result["mean_settlement_mm"].isna().all()
+    assert result["t_ci_low"].isna().all()
 
 
 def test_group_comparison_preserves_pairs_for_bootstrap_and_permutation() -> None:

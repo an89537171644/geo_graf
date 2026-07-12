@@ -52,6 +52,97 @@ def test_failure_interval_in_report_uses_decimal_comma() -> None:
     assert "1.25 < Fu" not in report
 
 
+def test_report_records_failure_contract_counts_and_curve_selection() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1", "T1"],
+            "stage": [1, 2],
+            "load": [1.0, 2.0],
+            "settlement": [0.2, np.nan],
+            "status": ["stable", "failure"],
+        }
+    )
+    metadata = {"stamp_area_m2": 0.1, "load_resolution_kN": 0.01}
+    prepared, issues = prepare_measurements(raw, metadata)
+    report = build_markdown_report(
+        metadata=metadata,
+        prepared=prepared,
+        validation_issues=issues,
+        failures=failure_summary(prepared),
+        failure_analysis={
+            "contract_version": "failure-analysis/1.0",
+            "summary_method": "none",
+            "point_estimate": None,
+            "n_failure_observed": 1,
+            "n_interval_censored": 1,
+            "n_right_censored": 0,
+            "n_indeterminate": 0,
+        },
+        curve_selections=[
+            {
+                "group": "baseline",
+                "method": "manual_representative",
+                "test_id": "T1",
+                "author": "engineer",
+                "timestamp_utc": "2026-07-12T06:00:00+00:00",
+                "reason": "Representative specimen confirmed.",
+            }
+        ],
+        audit=AuditTrail(),
+    )
+
+    assert "Наблюдавшихся разрушений: 1" in report
+    assert "Интервально цензурированных: 1" in report
+    assert "Метод сводной оценки: `none`" in report
+    assert "Сводная точечная оценка Fu/pu не рассчитывалась" in report
+    assert "method=`manual_representative`" in report
+    assert "author=`engineer`" in report
+
+
+def test_report_uses_canonical_pressure_capacity_and_indeterminate_state() -> None:
+    pressure_raw = pd.DataFrame(
+        {
+            "test_id": ["P1", "P1"],
+            "stage": [1, 2],
+            "load": [100.0, 150.0],
+            "settlement": [0.2, np.nan],
+            "status": ["stable", "failure"],
+        }
+    )
+    pressure_metadata = {
+        "load_kind": "pressure",
+        "load_unit": "kPa",
+        "stamp_area_m2": 0.1,
+    }
+    pressure, issues = prepare_measurements(pressure_raw, pressure_metadata)
+    pressure_report = build_markdown_report(
+        metadata=pressure_metadata,
+        prepared=pressure,
+        validation_issues=issues,
+        failures=failure_summary(pressure),
+        audit=AuditTrail(),
+    )
+
+    assert "100,0 < pu ≤ 150,0 кПа" in pressure_report
+    assert "< Fu ≤" not in pressure_report
+
+    indeterminate = pressure.iloc[[0]].copy()
+    indeterminate[["F_kN", "p_kPa"]] = np.nan
+    indeterminate["status"] = "invalid"
+    indeterminate["is_failure"] = False
+    indeterminate_failures = failure_summary(indeterminate)
+    indeterminate_report = build_markdown_report(
+        metadata=pressure_metadata,
+        prepared=indeterminate,
+        validation_issues=[],
+        failures=indeterminate_failures,
+        audit=AuditTrail(),
+    )
+
+    assert "требуется инженерная проверка (indeterminate)" in indeterminate_report
+    assert "(правое цензурирование)" not in indeterminate_report
+
+
 def test_report_exposes_group_pairing_decision_and_fallback_warning() -> None:
     metadata = {"stamp_area_m2": 0.1, "indicator_resolution_mm": 0.01}
     raw = pd.DataFrame(

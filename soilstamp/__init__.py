@@ -2,6 +2,7 @@
 
 from .analysis import (
     PairingResolution,
+    aggregate_group_curve,
     calculate_moduli_for_test,
     compare_groups,
     deformation_work,
@@ -25,6 +26,8 @@ from .data import (
     AuditTrail,
     apply_settlement_correction,
     classify_branches,
+    failure_analysis_contract,
+    failure_analysis_summary,
     failure_summary,
     prepare_measurements,
     validate_measurements,
@@ -86,6 +89,7 @@ from .schema import (
 
 __all__ = [
     "AuditTrail",
+    "aggregate_group_curve",
     "apply_settlement_correction",
     "classify_branches",
     "calculate_moduli_for_test",
@@ -118,6 +122,8 @@ __all__ = [
     "ModulusOverrides",
     "ModulusResolution",
     "PairingResolution",
+    "failure_analysis_contract",
+    "failure_analysis_summary",
     "failure_summary",
     "evaluate_indicator_verification",
     "fit_segmented_pcr",

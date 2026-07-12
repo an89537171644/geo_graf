@@ -13,6 +13,8 @@
 - Phase 02 remote head: `62326f596def0044058c1972bbd6dcb7720d2209`
 - Phase 03 local code head: `cc909901bf52c50a1214793caeb88beccd149618`
 - Phase 03 remote head: `148622d1c171dbd404ac5ef572cae6b13afb451d`
+- Phase 04 local code head: `420e5f02334a1b747e74c4cf6857ab308aceda7e`
+- Phase 04 remote head: pending built-in GitHub publication
 
 ## Phase status
 
@@ -22,7 +24,7 @@
 | 01 E contract | COMPLETE | local `0474c80`; remote `74320b5` | 215 tests; core coverage 80.97%; CLI demo verified | [run 29184900474](https://github.com/an89537171644/geo_graf/actions/runs/29184900474): 6/6 matrix + Required CI SUCCESS; 6 artifacts | No primary E without an approved profile, confirmed in-range interval and valid positive calculation |
 | 02 Pairing | COMPLETE | local `3a8a545`; remote `62326f5` | 233 tests; core coverage 81.73%; CLI demo verified | [run 29186501814](https://github.com/an89537171644/geo_graf/actions/runs/29186501814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | `pair_id` is explicit; invalid, incomplete or ambiguous pairing falls back to independent analysis with a visible reason |
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
-| 04 Plots/censoring | NOT STARTED | — | — | — | Strict phase order |
+| 04 Plots/censoring | LOCAL COMPLETE / REMOTE CI PENDING | local `420e5f0` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | pending | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
 | 05 Stretch | NOT STARTED | — | — | — | Not permitted before phases 0–4 |
 
 ## Numerical changes
@@ -69,16 +71,42 @@ require an audited engineering distribution to channels. The indicator demo pres
 aggregation rows. Antonov plotting, the failure model and direct supplied settlement
 remain unchanged.
 
+Phase 04 changes publication presentation without changing the Antonov scientific
+curve model or inventing a failure-capacity estimator. A repeated series now requires
+an explicit `mean_curve`, `median_curve`, `manual_representative` or
+`individual_curves` decision; a manual representative requires test ID, author, UTC
+timestamp and reason. Groups, tests, bootstrap input and curve numbering are sorted
+canonically, so row order no longer selects a curve or changes the result.
+
+For F–s, aggregation is permitted only for identical finite stamp diameter and area
+and only over the common force support. For p–s, only the common pressure support is
+used. For p–s/D, each test is normalized before aggregation and contributes only
+inside its own measured support. No extrapolation is performed. Every exported point
+stores `n`, `measured_n` and `interpolated_n`; a marker is drawn only where no
+interpolated contribution is present.
+
+Failure results use `failure-analysis/1.0`. The demo contains two observed,
+interval-censored failures and two right-censored tests. Their individual bounds are
+drawn separately; no arithmetic pooling is present and `summary_method=none` leaves
+`point_estimate=null`. The final local demo bundle
+`work/phase04-publication-demo-final/reproducibility.zip` passed the semantic verifier
+with SHA-256 `E98BD0CFBEF51C16AD3912B64E58F3D6BAD2E10982515020D3079EBD8201051F`.
+
 ## Remaining blockers
 
 - Engineering selection/approval of a pressure range for each real primary modulus.
 - Engineering verification of real `pair_id` values and group membership.
-- Publication/censoring presentation in Phase 04.
 - Real laboratory acceptance on at least three experiments.
+- Engineering approval of publication-curve decisions for every real repeated series;
+  manual representative decisions require a named author and reason.
 - Real channel assignments, instrument passports, coordinates and aggregation policy
   require engineering review; manual input also requires engineering acceptance.
 - SQLite archive, approved revisions, backup/restore and clean Windows distribution
   are not implemented and require engineering review.
 - Owner review and merge decision for Draft PR #5. Codex did not merge or enable auto-merge.
+
+The existing support-adaptive `compare_groups()` inference remains a separate,
+previously accepted comparison method; Phase 04 common-support rules apply to
+publication/group-curve aggregation and do not silently redefine that method.
 
 Current status: research beta under author control; not a finished engineering release.

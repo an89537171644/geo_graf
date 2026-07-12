@@ -1568,47 +1568,110 @@ def _stable_status_mask(frame: pd.DataFrame) -> pd.Series:
     return accepted & ~invalid & ~_failure_mask(frame)
 
 
-def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
-    """Summarize interval/right censoring without fabricating failure settlement."""
+FAILURE_ANALYSIS_CONTRACT_VERSION = "failure-analysis/1.0"
 
-    required = {"test_id", "F_kN", "p_kPa", "settlement_mm"}
+
+def _finite_optional_float(value: Any) -> float | None:
+    """Return a finite float without converting a missing bound into a value."""
+
+    if value is None or pd.isna(value):
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
+
+
+def _failure_sequence_value(row: pd.Series | None) -> int | float | str | None:
+    if row is None or "sequence_no" not in row or pd.isna(row.get("sequence_no")):
+        return None
+    value = row.get("sequence_no")
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        number = float(value)
+        return int(number) if number.is_integer() else number
+    return str(value)
+
+
+def _failure_capacity_fields(
+    payload: dict[str, Any],
+    *,
+    load_kind: str | None = None,
+) -> tuple[str, float | None, float | None, str | None]:
+    """Select the available physical coordinate without inventing conversions."""
+
+    force_lower = _finite_optional_float(payload.get("Fu_lower"))
+    force_upper = _finite_optional_float(payload.get("Fu_upper"))
+    pressure_lower = _finite_optional_float(payload.get("pu_lower"))
+    pressure_upper = _finite_optional_float(payload.get("pu_upper"))
+    if load_kind == "pressure":
+        return "pressure", pressure_lower, pressure_upper, "kPa"
+    if load_kind == "force":
+        return "force", force_lower, force_upper, "kN"
+    if force_lower is not None or force_upper is not None:
+        return "force", force_lower, force_upper, "kN"
+    if pressure_lower is not None or pressure_upper is not None:
+        return "pressure", pressure_lower, pressure_upper, "kPa"
+    return "unknown", None, None, None
+
+
+def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    """Summarize failure events and censoring without fabricating point estimates.
+
+    ``failure_observed`` records whether a failure event was documented.  It is
+    deliberately orthogonal to ``censoring_type``: in a step-loading protocol a
+    documented failure normally has an interval-censored capacity.
+    """
+
+    required = {"test_id", "F_kN", "p_kPa"}
     if not required.issubset(frame):
         raise ValueError(f"Не хватает столбцов: {sorted(required.difference(frame.columns))}")
     rows: list[dict[str, Any]] = []
     for test_id, part in frame.groupby("test_id", sort=False):
         ordered = part.sort_values("sequence_no", kind="stable") if "sequence_no" in part else part
-        fail_mask = ordered["is_failure"].astype(bool) if "is_failure" in ordered else _failure_mask(ordered)
+        load_kinds = (
+            ordered["load_kind"].dropna().astype(str).str.strip().str.casefold().unique().tolist()
+            if "load_kind" in ordered
+            else []
+        )
+        declared_load_kind = (
+            load_kinds[0]
+            if len(load_kinds) == 1 and load_kinds[0] in {"force", "pressure"}
+            else None
+        )
+        fail_mask = (
+            ordered["is_failure"].astype(bool)
+            if "is_failure" in ordered
+            else _failure_mask(ordered)
+        )
+        failure_event_count = int(fail_mask.sum())
+        failure_row: pd.Series | None = None
+        last: pd.Series | None = None
+        lower_bound_row: pd.Series | None = None
         if fail_mask.any():
             failure_pos = int(np.flatnonzero(fail_mask.to_numpy())[0])
             failure_row = ordered.iloc[failure_pos]
             before = ordered.iloc[:failure_pos]
             stable = before[
-                (before["F_kN"].notna() | before["p_kPa"].notna())
-                & _stable_status_mask(before)
+                (before["F_kN"].notna() | before["p_kPa"].notna()) & _stable_status_mask(before)
             ]
             last = stable.iloc[-1] if not stable.empty else None
             f_failure = float(failure_row["F_kN"]) if pd.notna(failure_row["F_kN"]) else None
-            f_stable = (
-                float(last["F_kN"])
-                if last is not None and pd.notna(last["F_kN"])
-                else None
-            )
+            f_stable = float(last["F_kN"]) if last is not None and pd.notna(last["F_kN"]) else None
             p_failure = float(failure_row["p_kPa"]) if pd.notna(failure_row["p_kPa"]) else None
             p_stable = (
-                float(last["p_kPa"])
-                if last is not None and pd.notna(last["p_kPa"])
-                else None
+                float(last["p_kPa"]) if last is not None and pd.notna(last["p_kPa"]) else None
             )
             s_stable = (
                 float(last["settlement_mm"])
-                if last is not None and pd.notna(last["settlement_mm"])
+                if last is not None and "settlement_mm" in last and pd.notna(last["settlement_mm"])
                 else None
             )
             s_failure = (
                 float(failure_row["settlement_mm"])
-                if pd.notna(failure_row["settlement_mm"])
+                if "settlement_mm" in failure_row and pd.notna(failure_row["settlement_mm"])
                 else None
             )
+            lower_bound_row = last
             result = FailureResult(
                 test_id=str(test_id),
                 failure_reached=True,
@@ -1633,8 +1696,7 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
             )
         else:
             stable = ordered[
-                _stable_status_mask(ordered)
-                & (ordered["F_kN"].notna() | ordered["p_kPa"].notna())
+                _stable_status_mask(ordered) & (ordered["F_kN"].notna() | ordered["p_kPa"].notna())
             ]
             fmax_raw = pd.to_numeric(stable["F_kN"], errors="coerce").max()
             fmax = float(fmax_raw) if pd.notna(fmax_raw) else None
@@ -1646,11 +1708,20 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
                 last_at_max = stable[np.isclose(stable["p_kPa"], pmax, rtol=0, atol=1e-12)]
             else:
                 last_at_max = stable.iloc[0:0]
-            s_at_max = float(last_at_max.iloc[-1]["settlement_mm"]) if not last_at_max.empty else None
+            lower_bound_row = last_at_max.iloc[-1] if not last_at_max.empty else None
+            last = lower_bound_row
+            s_at_max = (
+                float(lower_bound_row["settlement_mm"])
+                if lower_bound_row is not None
+                and "settlement_mm" in lower_bound_row
+                and pd.notna(lower_bound_row["settlement_mm"])
+                else None
+            )
+            has_valid_lower_bound = fmax is not None or pmax is not None
             result = FailureResult(
                 test_id=str(test_id),
                 failure_reached=False,
-                right_censored=True,
+                right_censored=has_valid_lower_bound,
                 F_last_stable=fmax,
                 F_failure_step=None,
                 Fu_lower=fmax,
@@ -1669,5 +1740,149 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
                     else "Предельная нагрузка не определена"
                 ),
             )
-        rows.append(asdict(result))
+        payload = asdict(result)
+        capacity_kind, capacity_lower, capacity_upper, capacity_unit = _failure_capacity_fields(
+            payload, load_kind=declared_load_kind
+        )
+        warnings: list[str] = []
+        if len(load_kinds) > 1:
+            warnings.append("inconsistent_load_kind")
+        if failure_event_count > 1:
+            warnings.append(f"multiple_failure_events:{failure_event_count};first_sequence_used")
+        failure_observed = failure_event_count > 0
+        valid_interval = (
+            failure_observed
+            and capacity_lower is not None
+            and capacity_upper is not None
+            and capacity_lower < capacity_upper
+        )
+        if valid_interval:
+            censoring_type = "interval_censored"
+        elif not failure_observed and capacity_lower is not None:
+            censoring_type = "right_censored"
+        else:
+            censoring_type = "indeterminate"
+            if failure_observed:
+                if capacity_lower is None or capacity_upper is None:
+                    warnings.append("missing_interval_bound")
+                else:
+                    warnings.append("invalid_interval_bounds")
+            else:
+                warnings.append("missing_valid_lower_bound")
+        classification_status = "review_required" if warnings else "ok"
+        if censoring_type == "indeterminate":
+            payload["display"] = (
+                "Разрушение зафиксировано; границы требуют проверки"
+                if failure_observed
+                else "Предельная нагрузка не определена; требуется проверка"
+            )
+        elif censoring_type == "interval_censored":
+            symbol = "Fu" if capacity_kind == "force" else "pu"
+            display_unit = "кН" if capacity_kind == "force" else "кПа"
+            payload["display"] = (
+                f"{capacity_lower:g} < {symbol} ≤ {capacity_upper:g} {display_unit}"
+            )
+        else:
+            symbol = "Fu" if capacity_kind == "force" else "pu"
+            display_unit = "кН" if capacity_kind == "force" else "кПа"
+            payload["display"] = f"{symbol} > {capacity_lower:g} {display_unit}"
+        classification_warning = ";".join(warnings) if warnings else None
+        payload.update(
+            {
+                "failure_observed": failure_observed,
+                "interval_censored": censoring_type == "interval_censored",
+                "right_censored": censoring_type == "right_censored",
+                "censoring_type": censoring_type,
+                "classification_status": classification_status,
+                "classification_warning": classification_warning,
+                "capacity_kind": capacity_kind,
+                "lower_bound": capacity_lower,
+                "upper_bound": capacity_upper,
+                "capacity_lower": capacity_lower,
+                "capacity_upper": capacity_upper,
+                "capacity_unit": capacity_unit,
+                "lower_inclusive": False,
+                "upper_inclusive": (
+                    True if censoring_type == "interval_censored" else None
+                ),
+                "warning": classification_warning,
+                "capacity_lower_inclusive": False if capacity_lower is not None else None,
+                "capacity_upper_inclusive": (
+                    True if censoring_type == "interval_censored" else None
+                ),
+                "failure_event_count": failure_event_count,
+                "failure_sequence_no": _failure_sequence_value(failure_row),
+                "last_stable_sequence_no": _failure_sequence_value(last),
+                "lower_bound_sequence_no": _failure_sequence_value(lower_bound_row),
+                "upper_bound_sequence_no": _failure_sequence_value(failure_row),
+            }
+        )
+        rows.append(payload)
+    rows.sort(key=lambda row: str(row["test_id"]))
     return pd.DataFrame(rows)
+
+
+def failure_analysis_contract() -> dict[str, Any]:
+    """Return the versioned, deliberately conservative failure-analysis contract."""
+
+    return {
+        "contract_version": FAILURE_ANALYSIS_CONTRACT_VERSION,
+        "default_summary_method": "none",
+        "supported_summary_methods": ["none"],
+        "supported_capacity_axes": ["auto", "force", "pressure"],
+        "point_estimate_policy": (
+            "No aggregate point estimate is produced unless a separately versioned "
+            "censored-data method is explicitly supported and selected."
+        ),
+    }
+
+
+def failure_analysis_summary(
+    failures: pd.DataFrame,
+    *,
+    summary_method: str = "none",
+    capacity_axis: str = "auto",
+) -> dict[str, Any]:
+    """Count failure/censoring states under ``failure-analysis/1.0``.
+
+    The current contract intentionally supports no aggregate estimator.  This
+    prevents interval bounds and right-censored lower bounds from being reduced
+    to a hidden arithmetic mean.
+    """
+
+    method = str(summary_method).strip()
+    if method != "none":
+        raise ValueError(
+            "Неподдерживаемый метод сводного анализа разрушения: "
+            f"{summary_method!r}. В failure-analysis/1.0 доступен только 'none'."
+        )
+    axis = str(capacity_axis).strip()
+    if axis not in {"auto", "force", "pressure"}:
+        raise ValueError("capacity_axis должен быть одним из: auto, force, pressure.")
+    if "censoring_type" not in failures:
+        raise ValueError("Сначала сформируйте таблицу через failure_summary().")
+    censoring = failures["censoring_type"].fillna("indeterminate").astype(str)
+    observed_source = failures.get(
+        "failure_observed", failures.get("failure_reached", pd.Series(False, index=failures.index))
+    )
+    observed = observed_source.fillna(False).astype(bool)
+    review = (
+        failures.get("classification_status", pd.Series("review_required", index=failures.index))
+        .fillna("review_required")
+        .astype(str)
+    )
+    return {
+        "contract_version": FAILURE_ANALYSIS_CONTRACT_VERSION,
+        "summary_method": method,
+        "capacity_axis": axis,
+        "capacity_unit": {"force": "kN", "pressure": "kPa"}.get(axis),
+        "analysis_status": "descriptive_only_no_point_estimate",
+        "point_estimate": None,
+        "point_estimate_unit": None,
+        "n_tests": int(len(failures)),
+        "n_failure_observed": int(observed.sum()),
+        "n_interval_censored": int(censoring.eq("interval_censored").sum()),
+        "n_right_censored": int(censoring.eq("right_censored").sum()),
+        "n_indeterminate": int(censoring.eq("indeterminate").sum()),
+        "n_review_required": int(review.eq("review_required").sum()),
+    }
