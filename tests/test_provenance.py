@@ -3,6 +3,7 @@ from __future__ import annotations
 from soilstamp.provenance import (
     build_provenance,
     load_conversion_formula,
+    metrology_evaluations_from_passports,
     passport_completeness,
     source_sha256,
     validate_project_metadata,
@@ -154,3 +155,45 @@ def test_malformed_nested_metadata_is_reported_without_passport_crash() -> None:
 
     assert status["complete"] is False
     assert sum(item.code == "invalid_metadata_section" for item in issues) == 3
+
+
+def test_provenance_contains_deterministic_metrology_evidence(tmp_path) -> None:
+    rows = metrology_evaluations_from_passports(
+        [
+            {
+                "test_id": "T2",
+                "channel": "indicator_1",
+                "instrument_id": "I-2",
+                "verification_date": "2026-01-01",
+                "verification_valid_until": "2027-01-01",
+                "verification_status": "valid",
+                "verification_evaluation_date": "2026-06-01",
+                "verification_evaluation_date_source": "experiment_date",
+                "verification_evaluation_rule": (
+                    "verification_date <= experiment_date <= verification_valid_until"
+                ),
+                "assignment_status": "confirmed",
+            },
+            {
+                "test_id": "T1",
+                "channel": "indicator_1",
+                "verification_status": "review_required",
+                "verification_evaluation_date": None,
+                "verification_evaluation_date_source": "missing_experiment_date",
+                "verification_evaluation_rule": (
+                    "verification_date <= experiment_date <= verification_valid_until"
+                ),
+            },
+        ]
+    )
+    record = build_provenance(
+        input_source=b"protocol",
+        metadata_source={"experiment_date": "2026-06-01"},
+        config={"mode": "test"},
+        project_root=tmp_path,
+        metrology_evaluations=rows,
+    )
+
+    assert [row["test_id"] for row in record.metrology_evaluations] == ["T1", "T2"]
+    assert record.metrology_evaluations[0]["verification_status"] == "review_required"
+    assert record.metrology_evaluations[1]["verification_evaluation_date"] == "2026-06-01"

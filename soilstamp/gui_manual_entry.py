@@ -25,6 +25,7 @@ from .manual_entry_models import (
     MANUAL_TEST_SCOPES,
     ManualAuditEvent,
     ManualDraft,
+    ManualIndicatorPassport,
     utc_now_iso,
 )
 from .manual_entry_service import (
@@ -127,6 +128,151 @@ def _option_index(options: list[str], value: str) -> tuple[list[str], int]:
     return options, options.index(value) if value in options else 0
 
 
+def _indicator_passport_widgets(
+    channel: str,
+    indicator: ManualIndicatorPassport | None,
+    *,
+    key_prefix: str,
+) -> dict[str, Any]:
+    """Render one concrete channel passport and return its exact raw payload."""
+
+    current = indicator or ManualIndicatorPassport()
+    widget_prefix = f"{key_prefix}_{channel}"
+    mode_options, mode_index = _option_index(
+        [
+            "increasing",
+            "increasing_wrapped",
+            "decreasing",
+            "decreasing_wrapped",
+            "cumulative_settlement",
+        ],
+        current.mode,
+    )
+    assignment_options, assignment_index = _option_index(
+        ["draft", "review_required", "confirmed", "migration_review_required"],
+        current.assignment_status,
+    )
+    sign_options, sign_index = _option_index(
+        ["1", "-1"], current.cumulative_sign or "1"
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    indicator_type = c1.text_input(
+        "Тип *", value=current.type, key=f"{widget_prefix}_type"
+    )
+    serial_number = c2.text_input(
+        "Заводской № *",
+        value=current.serial_number,
+        key=f"{widget_prefix}_serial",
+    )
+    instrument_id = c3.text_input(
+        "ID прибора *",
+        value=current.instrument_id or "",
+        key=f"{widget_prefix}_instrument_id",
+        help="ID задаётся явно и не подменяется заводским номером.",
+    )
+    mode = c4.selectbox(
+        "Режим шкалы *",
+        mode_options,
+        index=mode_index,
+        key=f"{widget_prefix}_mode",
+    )
+    range_mm = c1.text_input(
+        "Диапазон, мм *", value=current.range_mm or "", key=f"{widget_prefix}_range"
+    )
+    division_mm = c2.text_input(
+        "Цена деления, мм *",
+        value=current.division_mm or "",
+        key=f"{widget_prefix}_division",
+    )
+    correction_factor = c3.text_input(
+        "Поправочный коэффициент *",
+        value=current.correction_factor or "",
+        key=f"{widget_prefix}_factor",
+    )
+    cumulative_sign = c4.selectbox(
+        "Знак готовой осадки *",
+        sign_options,
+        index=sign_index,
+        key=f"{widget_prefix}_sign",
+    )
+    initial_reading = c1.text_input(
+        "Начальное показание",
+        value=current.initial_reading or "",
+        key=f"{widget_prefix}_initial",
+    )
+    initial_turn = int(
+        c2.number_input(
+            "Начальный оборот *",
+            value=int(current.initial_turn or 0),
+            step=1,
+            key=f"{widget_prefix}_initial_turn",
+        )
+    )
+    zero_correction_mm = c3.text_input(
+        "Коррекция нуля, мм *",
+        value=current.zero_correction_mm or "",
+        key=f"{widget_prefix}_zero",
+    )
+    max_increment_mm = c4.text_input(
+        "Макс. приращение, мм",
+        value=current.max_increment_mm or "",
+        key=f"{widget_prefix}_max_increment",
+    )
+    reverse_tolerance_mm = c1.text_input(
+        "Допуск обратного хода, мм",
+        value=current.reverse_tolerance_mm or "",
+        key=f"{widget_prefix}_reverse",
+    )
+    travel_range_mm = c2.text_input(
+        "Полный ход, мм",
+        value=current.travel_range_mm or "",
+        key=f"{widget_prefix}_travel",
+    )
+    verification_date = c3.text_input(
+        "Дата поверки *",
+        value=current.verification_date,
+        key=f"{widget_prefix}_verified",
+    )
+    verification_valid_until = c4.text_input(
+        "Поверка действует до *",
+        value=current.verification_valid_until,
+        key=f"{widget_prefix}_valid_until",
+    )
+    x_mm = c1.text_input(
+        "x, мм", value=current.x_mm or "", key=f"{widget_prefix}_x"
+    )
+    y_mm = c2.text_input(
+        "y, мм", value=current.y_mm or "", key=f"{widget_prefix}_y"
+    )
+    assignment_status = c3.selectbox(
+        "Назначение канала *",
+        assignment_options,
+        index=assignment_index,
+        key=f"{widget_prefix}_assignment",
+    )
+    return {
+        "type": indicator_type,
+        "serial_number": serial_number,
+        "instrument_id": instrument_id or None,
+        "range_mm": range_mm or None,
+        "division_mm": division_mm or None,
+        "correction_factor": correction_factor or None,
+        "mode": mode,
+        "initial_reading": initial_reading or None,
+        "initial_turn": initial_turn,
+        "zero_correction_mm": zero_correction_mm or None,
+        "max_increment_mm": max_increment_mm or None,
+        "reverse_tolerance_mm": reverse_tolerance_mm or None,
+        "travel_range_mm": travel_range_mm or None,
+        "verification_date": verification_date,
+        "verification_valid_until": verification_valid_until,
+        "x_mm": x_mm or None,
+        "y_mm": y_mm or None,
+        "cumulative_sign": cumulative_sign,
+        "assignment_status": assignment_status,
+    }
+
+
 def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) -> None:
     passport = service.draft.passport
     st.subheader("1. Паспорт опыта")
@@ -144,24 +290,15 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         ["kN", "N", "MN", "kgf", "tf", "kPa", "Pa", "MPa"],
         passport.load_unit,
     )
-    dial_modes, dial_mode_index = _option_index(
-        [
-            "increasing",
-            "increasing_wrapped",
-            "decreasing",
-            "decreasing_wrapped",
-            "cumulative_settlement",
-        ],
-        passport.dial_mode,
-    )
     shape_options, shape_index = _option_index(
         ["circle", "custom"], passport.stamp_shape
     )
     current_n = passport.number_of_indicators or 1
     current_n = min(4, max(1, int(current_n)))
-    serials = list(passport.indicator_serial_numbers)
-    while len(serials) < 4:
-        serials.append("")
+    indicator_payload = {
+        channel: values.to_dict() if values is not None else None
+        for channel, values in passport.indicator_passports.items()
+    }
 
     with st.form(f"{key_prefix}_passport_form_{service.draft.draft_id}"):
         c1, c2, c3 = st.columns(3)
@@ -171,7 +308,11 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
             "Архивный номер / ID *", value=passport.archive_number
         )
         test_name = c1.text_input("Название опыта", value=passport.test_name)
-        test_date = c2.text_input("Дата YYYY-MM-DD *", value=passport.test_date)
+        test_date = c2.text_input(
+            "Дата YYYY-MM-DD (необязательно)",
+            value=passport.test_date,
+            help="Без даты опыта статус поверки будет review_required.",
+        )
         operator = c3.text_input("Оператор *", value=passport.operator)
         laboratory_or_site = c1.text_input(
             "Лаборатория / площадка *", value=passport.laboratory_or_site
@@ -241,53 +382,104 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                 "Количество *", min_value=1, max_value=4, value=current_n, step=1
             )
         )
-        dial_mode = c2.selectbox(
-            "Режим шкалы *", dial_modes, index=dial_mode_index
+        reference_enabled = c2.checkbox(
+            "Опорный индикатор",
+            value=passport.indicator_passports.get("reference_indicator") is not None,
+            help="Паспорт reference_indicator хранится отдельно от вертикальных каналов.",
         )
-        dial_range = c3.text_input(
-            "Диапазон шкалы, мм *", value=passport.dial_range_mm or ""
+        metrology_options, metrology_index = _option_index(
+            ["draft", "confirmed", "migration_review_required"],
+            passport.metrology_status,
         )
-        dial_resolution = c4.text_input(
-            "Цена деления, мм *", value=passport.dial_resolution_mm or ""
+        metrology_status = c3.selectbox(
+            "Статус метрологии *", metrology_options, index=metrology_index
         )
-        correction_factor = c1.text_input(
-            "Поправочный коэффициент *",
-            value=passport.dial_correction_factor or "",
+        aggregation_options, aggregation_index = _option_index(
+            [
+                "all_channels_mean",
+                "selected_channels_mean",
+                "plane_center",
+                "primary_channel",
+                "no_aggregation",
+            ],
+            passport.settlement_aggregation,
         )
-        initial_reading = c2.text_input(
-            "Начальное показание", value=passport.dial_initial_reading or ""
+        settlement_aggregation = c4.selectbox(
+            "Агрегация осадки *",
+            aggregation_options,
+            index=aggregation_index,
         )
-        zero_correction = c3.text_input(
-            "Коррекция нуля, мм *",
-            value=passport.dial_zero_correction_mm or "",
+        active_channels = [
+            f"indicator_{index}" for index in range(1, number_of_indicators + 1)
+        ]
+        configured_default = [
+            channel
+            for channel in passport.settlement_aggregation_channels
+            if channel in active_channels
+        ]
+        aggregation_channels = st.multiselect(
+            "Фиксированный состав каналов",
+            active_channels,
+            default=configured_default,
+            help=(
+                "Состав сохраняется до обработки и не меняется по строкам. "
+                "Для all_channels_mean выберите все активные каналы."
+            ),
         )
-        max_increment = c4.text_input(
-            "Макс. приращение, мм",
-            value=passport.dial_max_increment_mm or "",
+        primary_options = ["", *active_channels]
+        primary_default = (
+            passport.settlement_primary_channel
+            if passport.settlement_primary_channel in active_channels
+            else ""
         )
-        reverse_tolerance = c1.text_input(
-            "Допуск обратного хода, мм",
-            value=passport.dial_reverse_tolerance_mm or "",
+        primary_channel = c1.selectbox(
+            "Основной канал",
+            primary_options,
+            index=primary_options.index(primary_default),
         )
-        travel_range = c2.text_input(
-            "Полный ход, мм", value=passport.dial_travel_range_mm or ""
+        missing_options, missing_index = _option_index(
+            ["block", "allow_if_solvable"],
+            passport.settlement_missing_channel_policy,
         )
-        indicator_type = c3.text_input(
-            "Тип индикатора *", value=passport.indicator_type
+        missing_policy = c2.selectbox(
+            "Пропуск канала *", missing_options, index=missing_index
         )
-        verification_date = c4.text_input(
-            "Дата поверки *", value=passport.verification_date
+        metrology_reason = c3.text_input(
+            "Причина подтверждения метрологии",
+            value="",
+            help="Обязательна при смене статуса на confirmed.",
         )
-        verification_until = c1.text_input(
-            "Поверка действует до *", value=passport.verification_valid_until
+        st.caption(
+            "Общего сохраняемого шаблона нет: каждый блок ниже является отдельным "
+            "паспортом конкретного канала."
         )
-        serial_values = list(serials)
-        for index in range(number_of_indicators):
-            serial_values[index] = st.text_input(
-                f"Заводской № индикатора {index + 1} *",
-                value=serial_values[index],
-                key=f"{key_prefix}_{service.draft.draft_id}_serial_{index + 1}",
-            )
+        for channel in active_channels:
+            with st.expander(
+                f"Паспорт {channel}", expanded=channel == "indicator_1"
+            ):
+                indicator_payload[channel] = _indicator_passport_widgets(
+                    channel,
+                    passport.indicator_passports.get(channel),
+                    key_prefix=f"{key_prefix}_{service.draft.draft_id}",
+                )
+        if reference_enabled:
+            with st.expander("Паспорт reference_indicator", expanded=False):
+                indicator_payload["reference_indicator"] = (
+                    _indicator_passport_widgets(
+                        "reference_indicator",
+                        passport.indicator_passports.get("reference_indicator"),
+                        key_prefix=f"{key_prefix}_{service.draft.draft_id}",
+                    )
+                )
+        else:
+            indicator_payload["reference_indicator"] = None
+        if passport.legacy_common_indicator_passport is not None:
+            with st.expander("Legacy-общий паспорт (только чтение)"):
+                st.warning(
+                    "Эти значения не участвуют в расчёте. Заполните первый "
+                    "поканальный паспорт вручную, затем используйте явное копирование."
+                )
+                st.json(passport.legacy_common_indicator_passport.to_dict())
 
         reinforcement_changes: dict[str, Any] = {}
         if is_reinforced:
@@ -347,17 +539,31 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
             )
             if not isinstance(custom_parameters, dict):
                 raise ValueError("custom_parameters должен быть JSON-объектом.")
-            last_serial = max(
+            previous_indicator_payload = {
+                channel: values.to_dict() if values is not None else None
+                for channel, values in passport.indicator_passports.items()
+            }
+            metrology_changed = any(
                 (
-                    index + 1
-                    for index, value in enumerate(serial_values)
-                    if str(value).strip()
-                ),
-                default=number_of_indicators,
+                    test_date != passport.test_date,
+                    number_of_indicators != passport.number_of_indicators,
+                    indicator_payload != previous_indicator_payload,
+                    settlement_aggregation != passport.settlement_aggregation,
+                    list(aggregation_channels)
+                    != list(passport.settlement_aggregation_channels),
+                    (primary_channel or None) != passport.settlement_primary_channel,
+                    missing_policy != passport.settlement_missing_channel_policy,
+                    metrology_status != passport.metrology_status,
+                )
             )
-            preserved_serials = serial_values[
-                : max(number_of_indicators, last_serial)
-            ]
+            if (
+                metrology_status == "confirmed"
+                and metrology_changed
+                and not metrology_reason.strip()
+            ):
+                raise ValueError(
+                    "Для изменения или подтверждения поканальной метрологии укажите причину."
+                )
             changes: dict[str, Any] = {
                 "project_name": project_name,
                 "series_name": series_name,
@@ -383,30 +589,86 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                 "load_factor": load_factor,
                 "load_zero": load_zero,
                 "lever_ratio": lever_ratio,
-                "dial_mode": dial_mode,
-                "dial_range_mm": dial_range,
-                "dial_resolution_mm": dial_resolution,
-                "dial_correction_factor": correction_factor,
-                "dial_initial_reading": initial_reading,
-                "dial_zero_correction_mm": zero_correction,
-                "dial_max_increment_mm": max_increment,
-                "dial_reverse_tolerance_mm": reverse_tolerance,
-                "dial_travel_range_mm": travel_range,
-                "indicator_type": indicator_type,
-                "indicator_serial_numbers": preserved_serials,
-                "verification_date": verification_date,
-                "verification_valid_until": verification_until,
                 "number_of_indicators": number_of_indicators,
+                "indicator_passports": indicator_payload,
+                "settlement_aggregation": settlement_aggregation,
+                "settlement_aggregation_channels": aggregation_channels,
+                "settlement_primary_channel": primary_channel or None,
+                "settlement_missing_channel_policy": missing_policy,
+                "metrology_status": metrology_status,
                 "comment": comment,
                 "reinforcement.custom_parameters": custom_parameters,
                 **reinforcement_changes,
             }
-            if service.update_passport(changes, author=actor):
+            if service.update_passport(
+                changes,
+                author=actor,
+                reason=metrology_reason.strip() or "manual_edit",
+            ):
                 _bump_editor()
                 st.success("Паспорт сохранён; изменение записано в аудит.")
                 st.rerun()
         except (ValueError, ManualEntryServiceError) as exc:
             st.error(str(exc))
+
+    with st.expander("Явно копировать паспорт между каналами"):
+        assigned_channels = [
+            channel
+            for channel, values in service.draft.passport.indicator_passports.items()
+            if values is not None
+        ]
+        if not assigned_channels:
+            st.info(
+                "Сначала вручную заполните и сохраните паспорт исходного канала."
+            )
+        else:
+            copy_source = st.selectbox(
+                "Исходный канал",
+                assigned_channels,
+                key=f"{key_prefix}_passport_copy_source",
+            )
+            copy_targets = st.multiselect(
+                "Целевые каналы",
+                [
+                    channel
+                    for channel in (
+                        "indicator_1",
+                        "indicator_2",
+                        "indicator_3",
+                        "indicator_4",
+                        "reference_indicator",
+                    )
+                    if channel != copy_source
+                ],
+                key=f"{key_prefix}_passport_copy_targets",
+            )
+            copy_reason = st.text_input(
+                "Причина копирования *",
+                key=f"{key_prefix}_passport_copy_reason",
+                help="Команда и причина сохраняются в audit trail для каждого канала.",
+            )
+            if st.button(
+                "Копировать паспорт в каналы",
+                key=f"{key_prefix}_passport_copy_button",
+            ):
+                try:
+                    changed = service.copy_indicator_passport(
+                        copy_source,
+                        copy_targets,
+                        author=actor,
+                        reason=copy_reason,
+                    )
+                except ManualEntryServiceError as exc:
+                    st.error(str(exc))
+                else:
+                    if changed:
+                        _bump_editor()
+                        st.success(
+                            "Паспорта скопированы явно; независимые копии и причина записаны в аудит."
+                        )
+                        st.rerun()
+                    else:
+                        st.info("Изменений нет.")
 
 
 def _run_action(action, *, success: str) -> None:

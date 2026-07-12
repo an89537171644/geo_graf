@@ -154,6 +154,7 @@ def test_report_and_bundle_include_provenance_source_and_manifest() -> None:
         assert "results/indicator_processing_audit.csv" in names
         assert "results/indicator_processing_events.csv" in names
         assert "results/indicator_calibration_parameters.csv" in names
+        assert "results/indicator_aggregation_results.csv" in names
         assert all(".." not in name for name in names)
         assert "results/escape.json" in names
         assert "figures/bad.svg" in names
@@ -195,6 +196,15 @@ def test_report_summarizes_indicator_passport_crossings_and_qc() -> None:
             "correction_factor": 1.0,
             "verification_date": "2026-01-01",
             "verification_valid_until": "2027-01-01",
+            "verification_status": "valid",
+            "verification_evaluation_date": "2026-06-01",
+            "verification_evaluation_date_source": "experiment_date",
+            "verification_evaluation_rule": (
+                "verification_date <= experiment_date <= verification_valid_until"
+            ),
+            "x_mm": 0.0,
+            "y_mm": 0.0,
+            "assignment_status": "confirmed",
             "compatibility_mode": False,
         }
     ]
@@ -220,6 +230,21 @@ def test_report_summarizes_indicator_passport_crossings_and_qc() -> None:
             "event_type": "small_reverse_motion",
         },
     ]
+    prepared.attrs["indicator_aggregation_results"] = [
+        {
+            "test_id": "T1",
+            "row_index": 0,
+            "sequence_index": 0,
+            "aggregation_method": "primary_channel",
+            "channels_required": '["indicator_1"]',
+            "channels_used": '["indicator_1"]',
+            "missing_channels": "[]",
+            "aggregation_status": "ok",
+            "plane_rank": None,
+            "plane_residual_rms_mm": None,
+            "tilt_magnitude_mm_per_mm": None,
+        }
+    ]
 
     report = build_markdown_report(
         metadata=metadata,
@@ -234,6 +259,10 @@ def test_report_summarizes_indicator_passport_crossings_and_qc() -> None:
     assert "переходов через ноль — 1" in report
     assert "точек обратного хода — 1" in report
     assert "ok=1, warning=1" in report
+    assert "## Агрегация осадки" in report
+    assert "primary_channel" in report
+    assert "статус=`valid`" in report
+    assert "дата оценки=2026-06-01 (experiment_date)" in report
 
 
 def test_report_marks_primary_modulus_and_shows_method_provenance() -> None:

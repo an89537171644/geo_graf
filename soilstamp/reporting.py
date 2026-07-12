@@ -20,6 +20,7 @@ import scipy
 
 from .data import AuditTrail
 from .indicators import (
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
@@ -147,13 +148,19 @@ def _modulus_profile(row: pandas.Series) -> str:
 def _indicator_tables_for_scope(
     prepared,
     test_ids: list[str] | None = None,
-) -> tuple[pandas.DataFrame, pandas.DataFrame, pandas.DataFrame]:
+) -> tuple[
+    pandas.DataFrame,
+    pandas.DataFrame,
+    pandas.DataFrame,
+    pandas.DataFrame,
+]:
     """Return calibration artefacts limited to the report's test scope."""
 
     tables = (
         indicator_audit_frame(prepared),
         indicator_event_frame(prepared),
         indicator_passport_frame(prepared),
+        indicator_aggregation_frame(prepared),
     )
     if test_ids is None:
         return tables
@@ -163,7 +170,7 @@ def _indicator_tables_for_scope(
         if not table.empty and "test_id" in table:
             table = table[table["test_id"].astype(str).isin(selected)].copy()
         scoped.append(table)
-    return scoped[0], scoped[1], scoped[2]
+    return scoped[0], scoped[1], scoped[2], scoped[3]
 
 
 def build_markdown_report(
@@ -239,9 +246,12 @@ def build_markdown_report(
             f"D={row['stamp_diameter_mm']}; A={row['stamp_area_m2']}."
         )
     lines.extend(["", "## Индикаторные каналы", ""])
-    indicator_audit, indicator_events, indicator_passports = _indicator_tables_for_scope(
-        prepared, selected_test_ids
-    )
+    (
+        indicator_audit,
+        indicator_events,
+        indicator_passports,
+        indicator_aggregation,
+    ) = _indicator_tables_for_scope(prepared, selected_test_ids)
     if indicator_passports.empty:
         raw_channels = [
             name
@@ -261,7 +271,16 @@ def build_markdown_report(
         for _, row in indicator_passports.iterrows():
             valid_from = str(row.get("verification_date") or "—")
             valid_until = str(row.get("verification_valid_until") or "—")
-            instrument = row.get("instrument_id") or row.get("serial_number") or "—"
+            verification_status = str(row.get("verification_status") or "review_required")
+            evaluation_date = str(row.get("verification_evaluation_date") or "—")
+            evaluation_source = str(
+                row.get("verification_evaluation_date_source") or "unknown"
+            )
+            evaluation_rule = str(
+                row.get("verification_evaluation_rule") or "—"
+            )
+            instrument_id = row.get("instrument_id") or "—"
+            serial_number = row.get("serial_number") or "—"
             compatibility = (
                 "; режим совместимости с ранее откалиброванной осадкой"
                 if bool(row.get("compatibility_mode", False))
@@ -269,11 +288,16 @@ def build_markdown_report(
             )
             lines.append(
                 f"- `{row.get('test_id')}` / `{row.get('channel')}`: "
-                f"тип={row.get('indicator_type') or '—'}; №={instrument}; "
+                f"тип={row.get('indicator_type') or '—'}; "
+                f"instrument_id={instrument_id}; заводской №={serial_number}; "
                 f"mode=`{row.get('mode')}`; диапазон={row.get('range_mm')} мм; "
                 f"цена деления={row.get('division_mm')} мм; "
                 f"коэффициент={row.get('correction_factor')}; "
-                f"поверка={valid_from}…{valid_until}{compatibility}."
+                f"координаты=({row.get('x_mm')}, {row.get('y_mm')}) мм; "
+                f"назначение=`{row.get('assignment_status') or '—'}`; "
+                f"поверка={valid_from}…{valid_until}; статус=`{verification_status}`; "
+                f"дата оценки={evaluation_date} ({evaluation_source}); "
+                f"правило=`{evaluation_rule}`{compatibility}."
             )
     if indicator_audit.empty:
         lines.append("- Таблица преобразования индикаторов пуста.")
@@ -312,6 +336,63 @@ def build_markdown_report(
             f"- Журнал: переходов через ноль — {zero_crossings}; точек обратного хода — "
             f"{reverse_points}; коррекций нуля — {correction_events}; точек с QC-флагами — {qc_points}."
         )
+    lines.extend(["", "## Агрегация осадки", ""])
+    if indicator_aggregation.empty:
+        lines.append(
+            "- Таблица агрегации пуста: осадка по индикаторным каналам не формировалась."
+        )
+    else:
+        for test_id, part in indicator_aggregation.groupby("test_id", sort=False):
+            methods = sorted(
+                set(part.get("aggregation_method", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            statuses = (
+                part.get("aggregation_status", pandas.Series(dtype="string"))
+                .fillna("unknown")
+                .astype(str)
+                .value_counts()
+                .to_dict()
+            )
+            status_text = ", ".join(
+                f"{name}={count}" for name, count in statuses.items()
+            )
+            required = sorted(
+                set(part.get("channels_required", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            used = sorted(
+                set(part.get("channels_used", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            missing = sorted(
+                set(part.get("missing_channels", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            lines.append(
+                f"- `{test_id}`: метод={', '.join(f'`{value}`' for value in methods) or '—'}; "
+                f"статусы={status_text or '—'}; required={required or ['[]']}; "
+                f"used={used or ['[]']}; missing={missing or ['[]']}."
+            )
+            plane_rank_values = pandas.to_numeric(
+                part.get(
+                    "plane_rank",
+                    pandas.Series(float("nan"), index=part.index),
+                ),
+                errors="coerce",
+            )
+            plane = part[plane_rank_values.notna()]
+            if not plane.empty:
+                ranks = sorted(
+                    set(pandas.to_numeric(plane["plane_rank"], errors="coerce").dropna().astype(int))
+                )
+                residual = pandas.to_numeric(
+                    plane.get("plane_residual_rms_mm"), errors="coerce"
+                ).dropna()
+                tilt = pandas.to_numeric(
+                    plane.get("tilt_magnitude_mm_per_mm"), errors="coerce"
+                ).dropna()
+                lines.append(
+                    f"  - plane_center: rank={ranks or '—'}; "
+                    f"residual RMS max={float(residual.max()) if len(residual) else '—'} мм; "
+                    f"tilt max={float(tilt.max()) if len(tilt) else '—'} мм/мм."
+                )
     lines.extend(["", "## Контроль качества", ""])
     if validation_issues:
         for issue in validation_issues:
@@ -520,6 +601,18 @@ def build_markdown_report(
                 f"- Время обработки UTC: `{payload.get('processing_timestamp_utc')}`.",
             ]
         )
+        evaluations = payload.get("metrology_evaluations") or []
+        lines.append(f"- Оценок срока поверки: {len(evaluations)}.")
+        for evaluation in evaluations:
+            if not isinstance(evaluation, dict):
+                continue
+            lines.append(
+                f"  - `{evaluation.get('test_id')}` / `{evaluation.get('channel')}`: "
+                f"status=`{evaluation.get('verification_status')}`; "
+                f"evaluation_date={evaluation.get('verification_evaluation_date') or '—'}; "
+                f"source=`{evaluation.get('verification_evaluation_date_source') or 'unknown'}`; "
+                f"rule=`{evaluation.get('verification_evaluation_rule') or '—'}`."
+            )
     return "\n".join(lines)
 
 
@@ -595,13 +688,19 @@ def reproducibility_bundle(
             ),
         )
         effective_result_tables = dict(result_tables or {})
-        indicator_audit, indicator_events, indicator_passports = _indicator_tables_for_scope(
-            prepared
-        )
+        (
+            indicator_audit,
+            indicator_events,
+            indicator_passports,
+            indicator_aggregation,
+        ) = _indicator_tables_for_scope(prepared)
         effective_result_tables.setdefault("indicator_processing_audit", indicator_audit)
         effective_result_tables.setdefault("indicator_processing_events", indicator_events)
         effective_result_tables.setdefault(
             "indicator_calibration_parameters", indicator_passports
+        )
+        effective_result_tables.setdefault(
+            "indicator_aggregation_results", indicator_aggregation
         )
         for name, table in effective_result_tables.items():
             safe_result_name = safe_component(name, "result")

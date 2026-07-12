@@ -45,6 +45,12 @@ def _artifact_payloads() -> dict[str, bytes]:
             },
             indent=2,
         ).encode(),
+        "indicator_aggregation_results.csv": (
+            "test_id,row_index,aggregation_method,channels_required,channels_used,"
+            "missing_channels,aggregation_status\n"
+            'DEMO-01,0,primary_channel,"[""indicator_1""]",'
+            '"[""indicator_1""]",[],ok\n'
+        ).encode(),
         "moduli.csv": (
             "test_id,method,E_stamp_app_kPa,profile_id,profile_version,is_primary,"
             "review_status,p_range_source,nu_source,shape_factor_source,used_indices,"
@@ -75,6 +81,9 @@ def _write_demo_artifacts(
 
     zip_payloads = {
         "data/prepared_machine.csv": payloads["prepared.csv"],
+        "results/indicator_aggregation_results.csv": payloads[
+            "indicator_aggregation_results.csv"
+        ],
         "results/failure_summary.csv": payloads["failure_summary.csv"],
         "results/pcr.json": payloads["pcr.json"],
         "results/moduli.csv": payloads["moduli.csv"],

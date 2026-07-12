@@ -13,6 +13,7 @@ from datetime import date
 from typing import Any, Iterable
 from uuid import UUID
 
+import numpy as np
 import pandas as pd
 
 from .indicators import canonical_indicator_mode
@@ -35,6 +36,15 @@ _LOAD_UNITS = {
 _SETTLEMENT_UNITS = {"mm", "мм", "cm", "см", "m", "м"}
 _STAMP_SHAPES = {"circle", "round", "круг", "круглый", "custom"}
 _TERMINAL_STATUSES = {"failure", "instrument_limit", "stopped_without_failure"}
+_INDICATOR_CHANNELS = tuple(f"indicator_{index}" for index in range(1, 5))
+_ALL_METROLOGY_CHANNELS = (*_INDICATOR_CHANNELS, "reference_indicator")
+_AGGREGATION_METHODS = {
+    "all_channels_mean",
+    "selected_channels_mean",
+    "plane_center",
+    "primary_channel",
+    "no_aggregation",
+}
 
 
 @dataclass(slots=True)
@@ -214,6 +224,445 @@ def _validate_date_field(
         return None
 
 
+def _indicator_number(
+    draft: ManualDraft,
+    issues: list[ValidationIssue],
+    channel: str,
+    indicator: Any,
+    name: str,
+    *,
+    positive: bool = False,
+    nonnegative: bool = False,
+    required: bool = True,
+) -> float | None:
+    raw = getattr(indicator, name)
+    if _blank(raw) and not required:
+        return None
+    value = _finite(raw)
+    invalid = value is None
+    if positive:
+        invalid = invalid or bool(value is not None and value <= 0)
+    if nonnegative:
+        invalid = invalid or bool(value is not None and value < 0)
+    if invalid:
+        condition = (
+            "положительным"
+            if positive
+            else "неотрицательным"
+            if nonnegative
+            else "конечным"
+        )
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_indicator_passport_number",
+                f"{channel}.{name} должно быть {condition} числом.",
+                column=f"indicator_passports.{channel}.{name}",
+                raw_value=raw,
+            )
+        )
+        return None
+    return value
+
+
+def _indicator_date(
+    draft: ManualDraft,
+    issues: list[ValidationIssue],
+    channel: str,
+    indicator: Any,
+    name: str,
+) -> date | None:
+    raw = getattr(indicator, name)
+    if _blank(raw):
+        issues.append(
+            _passport_issue(
+                draft,
+                "missing_manual_indicator_passport_field",
+                f"В паспорте {channel} не заполнено {name}.",
+                column=f"indicator_passports.{channel}.{name}",
+                raw_value=raw,
+            )
+        )
+        return None
+    try:
+        return date.fromisoformat(str(raw).strip())
+    except ValueError:
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_indicator_verification_date",
+                f"{channel}.{name} должно иметь формат YYYY-MM-DD.",
+                column=f"indicator_passports.{channel}.{name}",
+                raw_value=raw,
+            )
+        )
+        return None
+
+
+def _validate_indicator_passport(
+    draft: ManualDraft,
+    issues: list[ValidationIssue],
+    channel: str,
+    indicator: Any,
+    *,
+    experiment_date: date | None,
+) -> None:
+    prefix = f"indicator_passports.{channel}"
+    for name in ("type", "serial_number", "instrument_id", "mode"):
+        raw = getattr(indicator, name)
+        if _blank(raw):
+            issues.append(
+                _passport_issue(
+                    draft,
+                    "missing_manual_indicator_passport_field",
+                    f"В паспорте {channel} не заполнено {name}.",
+                    column=f"{prefix}.{name}",
+                    raw_value=raw,
+                )
+            )
+
+    mode = canonical_indicator_mode(indicator.mode)
+    if not mode:
+        issues.append(
+            _passport_issue(
+                draft,
+                "unsupported_manual_dial_mode",
+                f"Неизвестный режим шкалы в паспорте {channel}.",
+                column=f"{prefix}.mode",
+                raw_value=indicator.mode,
+            )
+        )
+    dial_range = _indicator_number(
+        draft, issues, channel, indicator, "range_mm", positive=True
+    )
+    division = _indicator_number(
+        draft, issues, channel, indicator, "division_mm", positive=True
+    )
+    _indicator_number(
+        draft, issues, channel, indicator, "correction_factor", positive=True
+    )
+    _indicator_number(draft, issues, channel, indicator, "zero_correction_mm")
+    if dial_range is not None and division is not None and division > dial_range:
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_dial_resolution_exceeds_range",
+                f"Цена деления {channel} не может превышать диапазон шкалы.",
+                column=f"{prefix}.division_mm",
+                raw_value=indicator.division_mm,
+            )
+        )
+    if mode and mode != "cumulative_settlement":
+        initial = _indicator_number(
+            draft, issues, channel, indicator, "initial_reading"
+        )
+        _indicator_number(
+            draft, issues, channel, indicator, "max_increment_mm", positive=True
+        )
+        if initial is not None and dial_range is not None and not (0 <= initial < dial_range):
+            issues.append(
+                _passport_issue(
+                    draft,
+                    "manual_initial_reading_out_of_range",
+                    f"Начальное показание {channel} должно быть в [0; range).",
+                    column=f"{prefix}.initial_reading",
+                    raw_value=indicator.initial_reading,
+                )
+            )
+    elif not _blank(indicator.initial_reading):
+        _indicator_number(
+            draft,
+            issues,
+            channel,
+            indicator,
+            "initial_reading",
+            required=False,
+        )
+    _indicator_number(
+        draft,
+        issues,
+        channel,
+        indicator,
+        "reverse_tolerance_mm",
+        nonnegative=True,
+        required=False,
+    )
+    _indicator_number(
+        draft,
+        issues,
+        channel,
+        indicator,
+        "travel_range_mm",
+        positive=True,
+        required=False,
+    )
+    initial_turn = indicator.initial_turn
+    if isinstance(initial_turn, bool) or not isinstance(initial_turn, int):
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_indicator_initial_turn",
+                f"{channel}.initial_turn должен быть целым числом.",
+                column=f"{prefix}.initial_turn",
+                raw_value=initial_turn,
+            )
+        )
+    cumulative_sign = _indicator_number(
+        draft, issues, channel, indicator, "cumulative_sign"
+    )
+    if cumulative_sign is not None and not math.isclose(
+        abs(cumulative_sign), 1.0, abs_tol=1e-12
+    ):
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_indicator_sign",
+                f"{channel}.cumulative_sign должен быть +1 или -1.",
+                column=f"{prefix}.cumulative_sign",
+                raw_value=indicator.cumulative_sign,
+            )
+        )
+    for coordinate in ("x_mm", "y_mm"):
+        _indicator_number(
+            draft,
+            issues,
+            channel,
+            indicator,
+            coordinate,
+            required=False,
+        )
+
+    verified = _indicator_date(
+        draft, issues, channel, indicator, "verification_date"
+    )
+    valid_until = _indicator_date(
+        draft, issues, channel, indicator, "verification_valid_until"
+    )
+    if verified is not None and valid_until is not None and valid_until < verified:
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_verification_period",
+                f"Срок поверки {channel} заканчивается раньше даты поверки.",
+                column=f"{prefix}.verification_valid_until",
+                raw_value=indicator.verification_valid_until,
+            )
+        )
+    if experiment_date is None:
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_indicator_verification_review_required",
+                f"Дата опыта неизвестна: статус поверки {channel} требует проверки.",
+                column="test_date",
+                raw_value=draft.passport.test_date,
+                level="warning",
+            )
+        )
+    elif verified is not None and experiment_date < verified:
+        issues.append(
+            _passport_issue(
+                draft,
+                "indicator_verification_not_yet_valid_at_test",
+                f"Поверка {channel} ещё не действовала на дату испытания.",
+                column=f"{prefix}.verification_date",
+                raw_value=indicator.verification_date,
+                level="warning",
+            )
+        )
+    elif valid_until is not None and experiment_date > valid_until:
+        issues.append(
+            _passport_issue(
+                draft,
+                "indicator_verification_expired_at_test",
+                f"На дату испытания срок поверки {channel} истёк.",
+                column=f"{prefix}.verification_valid_until",
+                raw_value=indicator.verification_valid_until,
+                level="warning",
+            )
+        )
+
+    if indicator.assignment_status != "confirmed":
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_indicator_assignment_not_confirmed",
+                f"Поканальное назначение {channel} не подтверждено инженером.",
+                column=f"{prefix}.assignment_status",
+                raw_value=indicator.assignment_status,
+            )
+        )
+
+
+def _validate_aggregation(
+    draft: ManualDraft,
+    issues: list[ValidationIssue],
+    active_channels: list[str],
+) -> None:
+    passport = draft.passport
+    method = passport.settlement_aggregation
+    configured = list(passport.settlement_aggregation_channels)
+    primary = passport.settlement_primary_channel
+    if method not in _AGGREGATION_METHODS:
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_settlement_aggregation",
+                "Выберите поддерживаемую политику агрегации осадки.",
+                column="settlement_aggregation",
+                raw_value=method,
+            )
+        )
+        return
+    if passport.settlement_missing_channel_policy not in {
+        "block",
+        "allow_if_solvable",
+    }:
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_missing_channel_policy",
+                "Политика пропуска должна быть block или allow_if_solvable.",
+                column="settlement_missing_channel_policy",
+                raw_value=passport.settlement_missing_channel_policy,
+            )
+        )
+    if len(configured) != len(set(configured)):
+        issues.append(
+            _passport_issue(
+                draft,
+                "duplicate_manual_aggregation_channel",
+                "Список каналов агрегации не должен содержать повторов.",
+                column="settlement_aggregation_channels",
+                raw_value=configured,
+            )
+        )
+    unknown = [channel for channel in configured if channel not in active_channels]
+    if unknown:
+        issues.append(
+            _passport_issue(
+                draft,
+                "inactive_manual_aggregation_channel",
+                "Агрегация ссылается на неактивные каналы: " + ", ".join(unknown),
+                column="settlement_aggregation_channels",
+                raw_value=configured,
+            )
+        )
+
+    if method == "no_aggregation":
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_settlement_aggregation_not_selected",
+                "Осадка не формируется, пока инженер не выберет метод агрегации.",
+                column="settlement_aggregation",
+                raw_value=method,
+            )
+        )
+        return
+    if method == "all_channels_mean" and configured != active_channels:
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_all_channels_basis_mismatch",
+                "Для all_channels_mean заранее зафиксируйте все активные каналы в их порядке.",
+                column="settlement_aggregation_channels",
+                raw_value=configured,
+            )
+        )
+    if method in {"selected_channels_mean", "plane_center"} and not configured:
+        issues.append(
+            _passport_issue(
+                draft,
+                "missing_manual_aggregation_channels",
+                "Для выбранного метода нужен непустой фиксированный список каналов.",
+                column="settlement_aggregation_channels",
+                raw_value=configured,
+            )
+        )
+    if method == "primary_channel":
+        if primary not in active_channels:
+            issues.append(
+                _passport_issue(
+                    draft,
+                    "invalid_manual_primary_channel",
+                    "Основной канал должен быть выбран из активных каналов.",
+                    column="settlement_primary_channel",
+                    raw_value=primary,
+                )
+            )
+    elif primary is not None:
+        issues.append(
+            _passport_issue(
+                draft,
+                "unused_manual_primary_channel",
+                "Основной канал задан, хотя выбран другой метод агрегации.",
+                column="settlement_primary_channel",
+                raw_value=primary,
+                level="warning",
+            )
+        )
+    if (
+        method != "plane_center"
+        and passport.settlement_missing_channel_policy != "block"
+    ):
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_missing_policy_not_applicable",
+                "allow_if_solvable допустим только для plane_center.",
+                column="settlement_missing_channel_policy",
+                raw_value=passport.settlement_missing_channel_policy,
+            )
+        )
+    if method != "plane_center":
+        return
+    if len(configured) < 3:
+        issues.append(
+            _passport_issue(
+                draft,
+                "insufficient_manual_plane_channels",
+                "Для plane_center нужны минимум три заранее выбранных канала.",
+                column="settlement_aggregation_channels",
+                raw_value=configured,
+            )
+        )
+        return
+    coordinates: list[tuple[float, float]] = []
+    for channel in configured:
+        indicator = passport.indicator_passports.get(channel)
+        if indicator is None:
+            continue
+        x_value = _finite(indicator.x_mm)
+        y_value = _finite(indicator.y_mm)
+        if x_value is None or y_value is None:
+            issues.append(
+                _passport_issue(
+                    draft,
+                    "missing_manual_plane_coordinate",
+                    f"Для {channel} задайте конечные x_mm и y_mm.",
+                    column=f"indicator_passports.{channel}.x_mm/y_mm",
+                    raw_value=[indicator.x_mm, indicator.y_mm],
+                )
+            )
+            continue
+        coordinates.append((x_value, y_value))
+    if len(coordinates) == len(configured):
+        design = np.column_stack(
+            [np.ones(len(coordinates)), np.asarray(coordinates, dtype=float)]
+        )
+        if int(np.linalg.matrix_rank(design)) < 3:
+            issues.append(
+                _passport_issue(
+                    draft,
+                    "collinear_manual_plane_coordinates",
+                    "Координаты каналов plane_center коллинеарны.",
+                    column="settlement_aggregation_channels",
+                    raw_value=coordinates,
+                )
+            )
+
+
 def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
     passport = draft.passport
     issues: list[ValidationIssue] = []
@@ -231,8 +680,6 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
         "load_kind",
         "load_unit",
         "settlement_unit",
-        "dial_mode",
-        "indicator_type",
     ):
         _require_text(draft, issues, name)
     if not passport.test_id:
@@ -261,30 +708,7 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
             )
         )
 
-    test_date = _validate_date_field(draft, issues, "test_date")
-    verified = _validate_date_field(draft, issues, "verification_date")
-    valid_until = _validate_date_field(draft, issues, "verification_valid_until")
-    if verified is not None and valid_until is not None and valid_until < verified:
-        issues.append(
-            _passport_issue(
-                draft,
-                "invalid_manual_verification_period",
-                "Срок действия поверки не может заканчиваться раньше даты поверки.",
-                column="verification_valid_until",
-                raw_value=passport.verification_valid_until,
-            )
-        )
-    if test_date is not None and valid_until is not None and test_date > valid_until:
-        issues.append(
-            _passport_issue(
-                draft,
-                "indicator_verification_expired_at_test",
-                "На дату испытания срок поверки индикатора истёк.",
-                column="verification_valid_until",
-                raw_value=passport.verification_valid_until,
-                level="warning",
-            )
-        )
+    test_date = _validate_date_field(draft, issues, "test_date", required=False)
 
     if passport.test_scope not in MANUAL_TEST_SCOPES:
         issues.append(
@@ -355,51 +779,9 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
     _require_number(draft, issues, "load_factor", positive=True)
     _require_number(draft, issues, "load_zero")
     _require_number(draft, issues, "lever_ratio", positive=True)
-    dial_range = _require_number(draft, issues, "dial_range_mm", positive=True)
-    dial_resolution = _require_number(draft, issues, "dial_resolution_mm", positive=True)
-    _require_number(draft, issues, "dial_correction_factor", positive=True)
-    _require_number(draft, issues, "dial_zero_correction_mm")
-    if dial_range is not None and dial_resolution is not None and dial_resolution > dial_range:
-        issues.append(
-            _passport_issue(
-                draft,
-                "manual_dial_resolution_exceeds_range",
-                "Цена деления не может превышать диапазон шкалы.",
-                column="dial_resolution_mm",
-                raw_value=passport.dial_resolution_mm,
-            )
-        )
-
-    mode = canonical_indicator_mode(passport.dial_mode)
-    if not mode:
-        issues.append(
-            _passport_issue(
-                draft,
-                "unsupported_manual_dial_mode",
-                "Неизвестный режим индикаторной шкалы.",
-                column="dial_mode",
-                raw_value=passport.dial_mode,
-            )
-        )
-    if mode and mode != "cumulative_settlement":
-        initial = _require_number(draft, issues, "dial_initial_reading")
-        _require_number(draft, issues, "dial_max_increment_mm", positive=True)
-        if initial is not None and dial_range is not None and not (0 <= initial < dial_range):
-            issues.append(
-                _passport_issue(
-                    draft,
-                    "manual_initial_reading_out_of_range",
-                    "Начальное показание должно находиться в диапазоне [0; range).",
-                    column="dial_initial_reading",
-                    raw_value=passport.dial_initial_reading,
-                )
-            )
-    if not _blank(passport.dial_reverse_tolerance_mm):
-        _require_number(draft, issues, "dial_reverse_tolerance_mm", nonnegative=True)
-    if not _blank(passport.dial_travel_range_mm):
-        _require_number(draft, issues, "dial_travel_range_mm", positive=True)
 
     count = passport.number_of_indicators
+    active_channels: list[str] = []
     if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 4:
         issues.append(
             _passport_issue(
@@ -411,39 +793,82 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
             )
         )
     else:
-        serials = [str(value).strip() for value in passport.indicator_serial_numbers]
-        active_serials = serials[:count]
-        if len(active_serials) != count or any(not value for value in active_serials):
-            issues.append(
-                _passport_issue(
-                    draft,
-                    "manual_indicator_serial_count_mismatch",
-                    "Для каждого активного индикатора нужен отдельный заводской номер.",
-                    column="indicator_serial_numbers",
-                    raw_value=passport.indicator_serial_numbers,
+        active_channels = list(_INDICATOR_CHANNELS[:count])
+        for channel in active_channels:
+            indicator = passport.indicator_passports.get(channel)
+            if indicator is None:
+                issues.append(
+                    _passport_issue(
+                        draft,
+                        "missing_manual_indicator_channel_passport",
+                        f"Для активного канала {channel} нужен отдельный паспорт.",
+                        column=f"indicator_passports.{channel}",
+                    )
                 )
+                continue
+            _validate_indicator_passport(
+                draft,
+                issues,
+                channel,
+                indicator,
+                experiment_date=test_date,
             )
-        if len(serials) > 4:
-            issues.append(
-                _passport_issue(
-                    draft,
-                    "manual_indicator_serial_count_exceeded",
-                    "Допускается сохранить не более четырёх заводских номеров.",
-                    column="indicator_serial_numbers",
-                    raw_value=passport.indicator_serial_numbers,
+        for channel in _INDICATOR_CHANNELS[count:]:
+            if passport.indicator_passports.get(channel) is not None:
+                issues.append(
+                    _passport_issue(
+                        draft,
+                        "inactive_manual_indicator_passport",
+                        f"Паспорт {channel} сохранён, но канал неактивен и не участвует в расчёте.",
+                        column=f"indicator_passports.{channel}",
+                        level="warning",
+                    )
                 )
+
+    reference = passport.indicator_passports.get("reference_indicator")
+    if reference is not None:
+        _validate_indicator_passport(
+            draft,
+            issues,
+            "reference_indicator",
+            reference,
+            experiment_date=test_date,
+        )
+    if passport.metrology_status not in {
+        "draft",
+        "migration_review_required",
+        "confirmed",
+    }:
+        issues.append(
+            _passport_issue(
+                draft,
+                "invalid_manual_metrology_status",
+                "Неизвестный статус поканальной метрологии.",
+                column="metrology_status",
+                raw_value=passport.metrology_status,
             )
-        elif any(serials[count:]):
-            issues.append(
-                _passport_issue(
-                    draft,
-                    "inactive_manual_indicator_serial",
-                    "Заводские номера неактивных каналов сохранены и не участвуют в расчёте.",
-                    column="indicator_serial_numbers",
-                    raw_value=passport.indicator_serial_numbers[count:],
-                    level="warning",
-                )
+        )
+    elif passport.metrology_status == "migration_review_required":
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_metrology_migration_review_required",
+                "Старый общий паспорт сохранён, но его распределение по каналам ещё не подтверждено.",
+                column="metrology_status",
+                raw_value=passport.metrology_status,
             )
+        )
+    elif passport.metrology_status != "confirmed":
+        issues.append(
+            _passport_issue(
+                draft,
+                "manual_metrology_confirmation_required",
+                "Подтвердите поканальные паспорта перед расчётом.",
+                column="metrology_status",
+                raw_value=passport.metrology_status,
+            )
+        )
+    _validate_aggregation(draft, issues, active_channels)
 
     reinforcement_type = str(passport.reinforcement_type).strip().casefold()
     reinforcement = passport.reinforcement

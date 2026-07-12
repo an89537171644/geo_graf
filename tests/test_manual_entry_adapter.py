@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
 
 import numpy as np
@@ -14,7 +15,12 @@ from soilstamp.manual_entry_adapter import (
     ManualExperimentSource,
     adapt_manual_draft,
 )
-from soilstamp.manual_entry_models import ManualDraft, ManualPoint
+from soilstamp.manual_entry_models import (
+    ManualDraft,
+    ManualIndicatorPassport,
+    ManualLegacyIndicatorCommon,
+    ManualPoint,
+)
 
 
 def _draft(
@@ -48,23 +54,36 @@ def _draft(
         "load_zero": "0",
         "lever_ratio": "1",
         "settlement_unit": "mm",
-        "dial_mode": mode,
-        "dial_range_mm": "10",
-        "dial_resolution_mm": "0,01",
-        "dial_correction_factor": "1",
-        "dial_initial_reading": initial,
-        "dial_zero_correction_mm": "0",
-        "dial_max_increment_mm": "2",
-        "dial_reverse_tolerance_mm": "0,02",
-        "dial_travel_range_mm": "50",
-        "indicator_type": "ИЧ-10",
-        "indicator_serial_numbers": ["IND-001"],
-        "verification_date": "2026-01-15",
-        "verification_valid_until": "2030-01-15",
         "number_of_indicators": 1,
+        "settlement_aggregation": "primary_channel",
+        "settlement_aggregation_channels": ["indicator_1"],
+        "settlement_primary_channel": "indicator_1",
+        "settlement_missing_channel_policy": "block",
+        "metrology_status": "confirmed",
     }
     for name, value in values.items():
         setattr(passport, name, value)
+    passport.indicator_passports["indicator_1"] = ManualIndicatorPassport(
+        type="ИЧ-10",
+        serial_number="IND-001",
+        instrument_id="IND-001",
+        range_mm="10",
+        division_mm="0,01",
+        correction_factor="1",
+        mode=mode,
+        initial_reading=initial,
+        initial_turn=0,
+        zero_correction_mm="0",
+        max_increment_mm="2",
+        reverse_tolerance_mm="0,02",
+        travel_range_mm="50",
+        verification_date="2026-01-15",
+        verification_valid_until="2030-01-15",
+        x_mm="0",
+        y_mm="0",
+        cumulative_sign="1",
+        assignment_status="confirmed",
+    )
     for index, (row, load, reading) in enumerate(zip(draft.rows, loads, readings)):
         row.stage_no = str(index)
         row.elapsed_time_s = str(index * 60)
@@ -101,6 +120,67 @@ def test_adapter_preserves_decimal_comma_uuid_and_manual_provenance() -> None:
         bundle.raw_cells["canonical_field"].eq("indicator_1"), "raw_value"
     ].tolist() == ["0", "0,20", "0,50"]
     assert bundle.import_info["source_type"] == "manual"
+
+
+def test_adapter_preserves_explicit_channel_metrology_and_never_uses_legacy() -> None:
+    draft = _draft()
+    passport = draft.passport
+    passport.number_of_indicators = 2
+    second = deepcopy(passport.indicator_passports["indicator_1"])
+    assert second is not None
+    second.serial_number = "IND-002"
+    second.instrument_id = "instrument-002"
+    second.correction_factor = "1,015"
+    second.initial_reading = "0,25"
+    second.x_mm = "100"
+    second.y_mm = "0"
+    passport.indicator_passports["indicator_2"] = second
+    reference = deepcopy(second)
+    reference.serial_number = "REF-001"
+    reference.instrument_id = "reference-001"
+    reference.cumulative_sign = "-1"
+    reference.x_mm = None
+    reference.y_mm = None
+    passport.indicator_passports["reference_indicator"] = reference
+    passport.settlement_aggregation = "selected_channels_mean"
+    passport.settlement_aggregation_channels = ["indicator_1", "indicator_2"]
+    passport.settlement_primary_channel = None
+    passport.legacy_common_indicator_passport = ManualLegacyIndicatorCommon(
+        dial_mode="decreasing",
+        dial_range_mm="99",
+        dial_resolution_mm="1",
+        dial_correction_factor="9",
+        dial_initial_reading="9",
+        dial_zero_correction_mm="9",
+        dial_max_increment_mm="9",
+        dial_reverse_tolerance_mm="9",
+        dial_travel_range_mm="99",
+        indicator_type="LEGACY",
+        indicator_serial_numbers=["LEGACY-1"],
+        verification_date="2000-01-01",
+        verification_valid_until="2001-01-01",
+    )
+
+    bundle = adapt_manual_draft(draft)
+    channels = bundle.metadata["indicator_passports"]
+
+    assert set(channels) == {
+        "indicator_1",
+        "indicator_2",
+        "reference_indicator",
+    }
+    assert channels["indicator_1"]["correction_factor"] == pytest.approx(1.0)
+    assert channels["indicator_2"]["correction_factor"] == pytest.approx(1.015)
+    assert channels["indicator_2"]["initial_reading"] == pytest.approx(0.25)
+    assert channels["indicator_2"]["instrument_id"] == "instrument-002"
+    assert channels["reference_indicator"]["cumulative_sign"] == pytest.approx(-1.0)
+    assert bundle.metadata["settlement_aggregation"] == "selected_channels_mean"
+    assert bundle.metadata["settlement_aggregation_channels"] == [
+        "indicator_1",
+        "indicator_2",
+    ]
+    assert bundle.metadata["metrology_status"] == "confirmed"
+    assert all(item["type"] != "LEGACY" for item in channels.values())
     assert bundle.source_bytes == draft.to_json(indent=None).encode("utf-8")
 
 

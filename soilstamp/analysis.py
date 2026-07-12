@@ -6,6 +6,7 @@ analysis runs deterministic for a fixed random seed and suitable for tests.
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from scipy import stats
 from scipy.optimize import minimize_scalar
 
 from .data import AuditTrail, _stable_status_mask
+from .indicators import fit_indicator_plane
 from .methodology import (
     ModulusOverrides,
     ModulusResolution,
@@ -1456,50 +1458,104 @@ def center_and_tilt(
     reference_sign: float = -1.0,
     scale_to_mm: float = 1.0,
     indicator_resolution_mm: float = 0.0,
+    channels: Iterable[str] | None = None,
+    missing_channel_policy: str = "block",
 ) -> pd.DataFrame:
-    """Fit indicator plane only for rows with explicitly confirmed calibration."""
+    """Fit a plane on one fixed channel set using the shared core primitive."""
+
+    if {"aggregation_method", "aggregation_status"}.issubset(frame.columns):
+        saved = frame[frame["aggregation_method"].eq("plane_center")]
+        rows: list[dict[str, Any]] = []
+        for index, row in saved.iterrows():
+            used_raw = row.get("channels_used", "[]")
+            try:
+                used = json.loads(str(used_raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                used = []
+            status = str(row.get("aggregation_status") or "blocked_invalid_policy")
+            rows.append(
+                {
+                    "source_index": index,
+                    "test_id": str(row["test_id"]),
+                    "stage": row.get("stage"),
+                    "center_settlement_mm": (
+                        float(row["aggregated_settlement_mm"])
+                        if status == "ok"
+                        and pd.notna(row.get("aggregated_settlement_mm"))
+                        else np.nan
+                    ),
+                    "plane_rank": row.get("plane_rank"),
+                    "plane_residual_rms_mm": row.get("plane_residual_rms_mm"),
+                    "tilt_magnitude_mm_per_mm": row.get(
+                        "tilt_magnitude_mm_per_mm"
+                    ),
+                    "tilt_direction_deg": row.get("tilt_direction_deg"),
+                    "tilt_direction_resolved": bool(
+                        row.get("tilt_direction_resolved", False)
+                    )
+                    if pd.notna(row.get("tilt_direction_resolved"))
+                    else False,
+                    "n_indicators": len(used),
+                    "channels_required": row.get("channels_required", "[]"),
+                    "channels_used": used_raw,
+                    "missing_channels": row.get("missing_channels", "[]"),
+                    "aggregation_status": status,
+                    "indicator_mode": row.get("indicator_mode"),
+                    "indicator_unit": row.get("indicator_unit"),
+                    "indicator_calibration_factor": row.get(
+                        "indicator_calibration_factor"
+                    ),
+                }
+            )
+        return pd.DataFrame(rows)
 
     if not indicator_positions_mm or len(indicator_positions_mm) < 3:
         return pd.DataFrame()
-    raw_columns = [name for name in indicator_positions_mm if name in frame.columns]
-    calibrated_channel_mode = any(
-        f"{name}_settlement_mm" in frame for name in indicator_positions_mm
-    )
-    columns = (
-        [name for name in indicator_positions_mm if f"{name}_settlement_mm" in frame]
-        if calibrated_channel_mode
-        else raw_columns
-    )
-    if len(columns) < 3:
+    if missing_channel_policy not in {"block", "allow_if_solvable"}:
+        raise ValueError(
+            "missing_channel_policy должен быть block или allow_if_solvable."
+        )
+    if channels is None:
         return pd.DataFrame()
-    positions = np.array([indicator_positions_mm[name] for name in columns], dtype=float)
-    design = np.column_stack([np.ones(len(columns)), positions])
-    span = max(
-        (
-            float(np.linalg.norm(positions[i] - positions[j]))
-            for i in range(len(positions))
-            for j in range(i + 1, len(positions))
-        ),
-        default=0.0,
+    required = tuple(channels)
+    if (
+        len(required) < 3
+        or len(required) != len(set(required))
+        or any(name not in indicator_positions_mm for name in required)
+    ):
+        return pd.DataFrame()
+    calibrated_channel_mode = any(
+        f"{name}_settlement_mm" in frame for name in required
     )
     rows = []
     for index, row in frame.iterrows():
-        if not calibrated_channel_mode and not bool(row.get("indicator_calibration_confirmed", False)):
+        if not bool(row.get("indicator_calibration_confirmed", False)):
             continue
         row_indicator_sign = float(row.get("indicator_sign", indicator_sign))
         row_reference_sign = float(row.get("reference_sign", reference_sign))
         row_scale = float(row.get("indicator_scale_to_mm", scale_to_mm))
         row_calibration_factor = float(row.get("indicator_calibration_factor", 1.0))
-        calibrated_columns = [f"{name}_settlement_mm" for name in columns]
+        values: dict[str, float] = {}
         if calibrated_channel_mode:
-            z = pd.to_numeric(row[calibrated_columns], errors="coerce").to_numpy(dtype=float)
+            for name in required:
+                value = pd.to_numeric(
+                    pd.Series([row.get(f"{name}_settlement_mm")]), errors="coerce"
+                ).iloc[0]
+                if pd.notna(value):
+                    values[name] = float(value)
         else:
-            z = (
-                pd.to_numeric(row[columns], errors="coerce").to_numpy(dtype=float)
-                * row_indicator_sign
-                * row_scale
-                * row_calibration_factor
-            )
+            for name in required:
+                value = pd.to_numeric(
+                    pd.Series([row.get(name)]), errors="coerce"
+                ).iloc[0]
+                if pd.notna(value):
+                    values[name] = (
+                        float(value)
+                        * row_indicator_sign
+                        * row_scale
+                        * row_calibration_factor
+                    )
+        reference_missing = False
         if bool(row.get("reference_channel_used", False)) and "reference_indicator" in frame:
             reference_column = (
                 "reference_indicator_settlement_mm"
@@ -1508,41 +1564,62 @@ def center_and_tilt(
             )
             reference = pd.to_numeric(pd.Series([row.get(reference_column)]), errors="coerce").iloc[0]
             if pd.isna(reference):
-                continue
-            if calibrated_channel_mode and reference_column.endswith("_settlement_mm"):
-                z = z + float(reference)
+                reference_missing = True
             else:
-                z = (
-                    z
-                    + row_reference_sign
+                correction = (
+                    float(reference)
+                    if calibrated_channel_mode
+                    and reference_column.endswith("_settlement_mm")
+                    else row_reference_sign
                     * float(reference)
                     * row_scale
                     * row_calibration_factor
                 )
-        finite = np.isfinite(z)
-        if finite.sum() < 3 or np.linalg.matrix_rank(design[finite]) < 3:
-            continue
-        coefficients, *_ = np.linalg.lstsq(design[finite], z[finite], rcond=None)
-        bx, by = float(coefficients[1]), float(coefficients[2])
-        magnitude = math.hypot(bx, by)
+                values = {name: value + correction for name, value in values.items()}
+        used = tuple(name for name in required if name in values)
+        missing = tuple(name for name in required if name not in values)
         row_resolution = float(row.get("indicator_resolution_mm", indicator_resolution_mm))
-        direction_resolved = bool(
-            span > 0 and magnitude * span >= max(row_resolution, np.finfo(float).eps * span)
+        plane = fit_indicator_plane(
+            values,
+            {name: indicator_positions_mm[name] for name in used},
+            indicator_resolution_mm=row_resolution,
         )
+        if reference_missing or (
+            missing and missing_channel_policy == "block"
+        ) or len(used) < 3:
+            status = "blocked_missing_channels"
+        elif plane.rank < 3:
+            status = "blocked_collinear_geometry"
+        else:
+            status = "ok"
         rows.append(
             {
                 "source_index": index,
                 "test_id": str(row["test_id"]),
                 "stage": row["stage"],
-                "center_settlement_mm": float(coefficients[0]),
-                "tilt_magnitude_mm_per_mm": magnitude,
+                "center_settlement_mm": (
+                    plane.center_settlement_mm if status == "ok" else np.nan
+                ),
+                "plane_rank": plane.rank,
+                "plane_residual_rms_mm": plane.residual_rms_mm,
+                "tilt_magnitude_mm_per_mm": plane.tilt_magnitude_mm_per_mm,
                 "tilt_direction_deg": (
-                    (math.degrees(math.atan2(by, bx)) + 360.0) % 360.0
-                    if direction_resolved
+                    plane.tilt_direction_deg
+                    if plane.tilt_direction_deg is not None
                     else np.nan
                 ),
-                "tilt_direction_resolved": direction_resolved,
-                "n_indicators": int(finite.sum()),
+                "tilt_direction_resolved": plane.tilt_direction_resolved,
+                "n_indicators": len(used),
+                "channels_required": json.dumps(
+                    list(required), ensure_ascii=False, separators=(",", ":")
+                ),
+                "channels_used": json.dumps(
+                    list(used), ensure_ascii=False, separators=(",", ":")
+                ),
+                "missing_channels": json.dumps(
+                    list(missing), ensure_ascii=False, separators=(",", ":")
+                ),
+                "aggregation_status": status,
                 "indicator_mode": row.get("indicator_mode"),
                 "indicator_unit": row.get("indicator_unit"),
                 "indicator_calibration_factor": row_calibration_factor,

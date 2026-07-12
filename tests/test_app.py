@@ -73,6 +73,7 @@ def test_streamlit_user_csv_path_has_no_exceptions() -> None:
     assert any(
         item.value == "Преобразование показаний индикаторов" for item in app.subheader
     )
+    assert any(item.value == "Агрегация осадки" for item in app.subheader)
     assert any(
         item.label == "Скачать indicator_processing_audit.csv"
         for item in app.download_button

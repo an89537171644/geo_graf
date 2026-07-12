@@ -25,6 +25,7 @@ from typing import Iterable
 
 REQUIRED_ARTIFACTS = (
     "prepared.csv",
+    "indicator_aggregation_results.csv",
     "failure_summary.csv",
     "pcr.json",
     "moduli.csv",
@@ -37,6 +38,15 @@ REQUIRED_ARTIFACTS = (
 
 REQUIRED_CSV_COLUMNS = {
     "prepared.csv": {"test_id", "sequence_no", "settlement_mm", "F_kN", "p_kPa"},
+    "indicator_aggregation_results.csv": {
+        "test_id",
+        "row_index",
+        "aggregation_method",
+        "channels_required",
+        "channels_used",
+        "missing_channels",
+        "aggregation_status",
+    },
     "failure_summary.csv": {"test_id", "failure_reached"},
     "moduli.csv": {
         "test_id",
@@ -68,6 +78,7 @@ MODULUS_METHOD_COLUMNS = {
 
 ZIP_EXTERNAL_COPIES = {
     "data/prepared_machine.csv": "prepared.csv",
+    "results/indicator_aggregation_results.csv": "indicator_aggregation_results.csv",
     "results/failure_summary.csv": "failure_summary.csv",
     "results/pcr.json": "pcr.json",
     "results/moduli.csv": "moduli.csv",

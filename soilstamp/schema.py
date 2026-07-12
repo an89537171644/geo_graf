@@ -195,6 +195,18 @@ class IndicatorPassport:
     initial_turn: int = 0
     cumulative_sign: float = 1.0
     instrument_id: str | None = None
+    x_mm: float | None = None
+    y_mm: float | None = None
+    assignment_status: str = "review_required"
+    verification_status: str = "review_required"
+    verification_evaluation_date: str | None = None
+    verification_evaluation_date_source: str | None = None
+    verification_evaluation_rule: str = (
+        "verification_date <= experiment_date <= verification_valid_until"
+    )
+    reverse_tolerance_source: str = "passport"
+    cumulative_sign_source: str = "passport"
+    initial_turn_source: str = "passport"
     source_path: str = "metadata.indicator_passports"
     compatibility_mode: bool = False
 
@@ -209,6 +221,7 @@ class IndicatorProcessingResult:
     audit_rows: list[dict[str, Any]] = field(default_factory=list)
     event_rows: list[dict[str, Any]] = field(default_factory=list)
     passport_rows: list[dict[str, Any]] = field(default_factory=list)
+    aggregation_rows: list[dict[str, Any]] = field(default_factory=list)
     settlement_by_row: dict[int, float | None] = field(default_factory=dict)
     channel_settlement_by_row: dict[str, dict[int, float | None]] = field(
         default_factory=dict
@@ -272,6 +285,7 @@ class ProvenanceRecord:
     source_tree_sha256: str | None
     python_version: str
     dependency_versions: dict[str, str]
+    metrology_evaluations: list[dict[str, Any]] = field(default_factory=list)
     processing_timestamp_utc: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

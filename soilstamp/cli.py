@@ -12,6 +12,7 @@ import pandas as pd
 from .analysis import calculate_moduli_for_test, fit_segmented_pcr
 from .data import AuditTrail, apply_settlement_correction, failure_summary, prepare_measurements
 from .indicators import (
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
@@ -27,6 +28,7 @@ from .plotting import export_figure, plot_curves
 from .provenance import (
     build_provenance,
     effective_conversion_parameters,
+    metrology_evaluations_from_passports,
     passport_completeness,
     validate_project_metadata,
 )
@@ -142,6 +144,7 @@ def run(args: argparse.Namespace) -> Path:
     indicator_processing_audit = indicator_audit_frame(prepared)
     indicator_processing_events = indicator_event_frame(prepared)
     indicator_calibration_parameters = indicator_passport_frame(prepared)
+    indicator_aggregation_results = indicator_aggregation_frame(prepared)
     metadata_issues = validate_project_metadata(
         metadata, strict=args.import_mode in {"strict", "interactive"}
     )
@@ -176,6 +179,9 @@ def run(args: argparse.Namespace) -> Path:
         metadata_source=metadata_bytes,
         config=config_snapshot,
         project_root=Path(__file__).resolve().parents[1],
+        metrology_evaluations=metrology_evaluations_from_passports(
+            indicator_calibration_parameters
+        ),
     )
     audit = AuditTrail()
     audit.record(
@@ -304,6 +310,9 @@ def run(args: argparse.Namespace) -> Path:
     (args.out / "indicator_calibration_parameters.csv").write_text(
         indicator_calibration_parameters.to_csv(index=False), encoding="utf-8-sig"
     )
+    (args.out / "indicator_aggregation_results.csv").write_text(
+        indicator_aggregation_results.to_csv(index=False), encoding="utf-8-sig"
+    )
     (args.out / "failure_summary.csv").write_text(failures.to_csv(index=False), encoding="utf-8")
     if not moduli.empty:
         (args.out / "moduli.csv").write_text(moduli.to_csv(index=False), encoding="utf-8")
@@ -365,6 +374,7 @@ def run(args: argparse.Namespace) -> Path:
             "indicator_processing_audit": indicator_processing_audit,
             "indicator_processing_events": indicator_processing_events,
             "indicator_calibration_parameters": indicator_calibration_parameters,
+            "indicator_aggregation_results": indicator_aggregation_results,
         },
         figures=figures,
         run_parameters=vars(args),

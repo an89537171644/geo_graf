@@ -440,15 +440,59 @@ def test_free_text_failure_phrases_are_not_automatic_events(status: str) -> None
     assert any(issue.code == "unaccepted_status" for issue in issues)
 
 
+def _channel_passport(
+    *,
+    instrument_id: str = "IND-T1",
+    correction_factor: float = 1.0,
+    cumulative_sign: float = 1.0,
+    x_mm: float | None = None,
+    y_mm: float | None = None,
+) -> dict:
+    result = {
+        "type": "ИЧ-10",
+        "serial_number": instrument_id,
+        "instrument_id": instrument_id,
+        "range_mm": 10.0,
+        "division_mm": 0.01,
+        "correction_factor": correction_factor,
+        "verification_date": "2026-01-01",
+        "verification_valid_until": "2030-01-01",
+        "mode": "cumulative_settlement",
+        "initial_reading": None,
+        "initial_turn": 0,
+        "zero_correction_mm": 0.0,
+        "max_increment_mm": None,
+        "reverse_tolerance_mm": 0.02,
+        "travel_range_mm": 50.0,
+        "cumulative_sign": cumulative_sign,
+    }
+    if x_mm is not None and y_mm is not None:
+        result.update({"x_mm": x_mm, "y_mm": y_mm})
+    return result
+
+
 def _indicator_metadata(**overrides) -> dict:
+    factor = float(overrides.pop("indicator_calibration_factor", 1.0))
+    sign = float(overrides.pop("indicator_sign", 1.0))
+    instrument = str(overrides.pop("indicator_instrument_id", "IND-T1"))
+    overrides.pop("indicator_unit", None)
     result = {
         **META,
-        "indicator_mode": "direct_displacement",
-        "indicator_unit": "mm",
-        "indicator_calibration_factor": 1.0,
-        "indicator_sign": 1.0,
+        "settlement_unit": "mm",
         "indicator_resolution_mm": 0.01,
-        "indicator_instrument_id": "IND-T1",
+        "experiment_date": "2026-02-01",
+        "metrology_status": "confirmed",
+        "settlement_aggregation": "primary_channel",
+        "settlement_aggregation_channels": ["indicator_1"],
+        "settlement_primary_channel": "indicator_1",
+        "settlement_missing_channel_policy": "block",
+        "indicator_passports": {
+            "indicator_1": _channel_passport(
+                instrument_id=instrument,
+                correction_factor=factor,
+                cumulative_sign=sign,
+            )
+        },
     }
     result.update(overrides)
     return result
@@ -515,7 +559,7 @@ def test_explicit_indicator_unit_and_factor_are_applied_independently() -> None:
     assert prepared["indicator_calibration_confirmed"].all()
 
 
-def test_reference_indicator_requires_explicit_reference_sign() -> None:
+def test_reference_indicator_requires_explicit_reference_passport() -> None:
     raw = pd.DataFrame(
         {
             "test_id": ["T1"],
@@ -527,8 +571,7 @@ def test_reference_indicator_requires_explicit_reference_sign() -> None:
     )
     _, issues = prepare_measurements(raw, _indicator_metadata())
     assert any(
-        item.code == "missing_indicator_calibration_metadata"
-        and item.column == "reference_sign"
+        item.code == "missing_reference_indicator_passport"
         for item in issues
     )
 
@@ -585,14 +628,28 @@ def test_center_and_tilt_uses_indicator_scale_and_calibration_factor() -> None:
             "indicator_3": [10.0],
         }
     )
-    prepared, issues = prepare_measurements(
-        raw,
-        _indicator_metadata(
-            settlement_unit="cm",
-            indicator_unit="mm",
-            indicator_calibration_factor=0.1,
-        ),
+    metadata = _indicator_metadata(
+        settlement_unit="cm",
+        indicator_calibration_factor=0.1,
     )
+    metadata["settlement_aggregation"] = "plane_center"
+    metadata["settlement_aggregation_channels"] = [
+        "indicator_1",
+        "indicator_2",
+        "indicator_3",
+    ]
+    metadata["indicator_passports"] = {
+        "indicator_1": _channel_passport(
+            instrument_id="IND-1", correction_factor=0.1, x_mm=0.0, y_mm=0.0
+        ),
+        "indicator_2": _channel_passport(
+            instrument_id="IND-2", correction_factor=0.1, x_mm=100.0, y_mm=0.0
+        ),
+        "indicator_3": _channel_passport(
+            instrument_id="IND-3", correction_factor=0.1, x_mm=0.0, y_mm=100.0
+        ),
+    }
+    prepared, issues = prepare_measurements(raw, metadata)
     tilt = center_and_tilt(
         prepared,
         {
@@ -619,16 +676,20 @@ def test_test_specific_indicator_calibration_is_resolved_per_test() -> None:
     metadata = _indicator_metadata(
         tests={
             "T1": {
-                "indicator_unit": "mm",
-                "indicator_calibration_factor": 0.1,
-                "indicator_sign": 1.0,
-                "indicator_instrument_id": "IND-T1",
+                "indicator_passports": {
+                    "indicator_1": _channel_passport(
+                        instrument_id="IND-T1", correction_factor=0.1
+                    )
+                },
             },
             "T2": {
-                "indicator_unit": "cm",
-                "indicator_calibration_factor": 0.2,
-                "indicator_sign": -1.0,
-                "indicator_instrument_id": "IND-T2",
+                "indicator_passports": {
+                    "indicator_1": _channel_passport(
+                        instrument_id="IND-T2",
+                        correction_factor=2.0,
+                        cumulative_sign=-1.0,
+                    )
+                },
             },
         }
     )
@@ -649,11 +710,174 @@ def test_reference_correction_is_numeric_and_missing_reference_stays_nan() -> No
             "reference_indicator": [1.0, np.nan],
         }
     )
-    prepared, issues = prepare_measurements(
-        raw, _indicator_metadata(reference_sign=-1.0)
+    metadata = _indicator_metadata()
+    metadata["indicator_passports"]["reference_indicator"] = _channel_passport(
+        instrument_id="REF-T1", cumulative_sign=-1.0
     )
+    prepared, issues = prepare_measurements(raw, metadata)
 
     assert not any(item.level == "error" for item in issues)
     assert prepared.loc[0, "settlement_raw_mm"] == pytest.approx(9.0)
     assert pd.isna(prepared.loc[1, "settlement_raw_mm"])
     assert any(item.code == "missing_reference_indicator" for item in issues)
+
+
+def test_prepared_layer_persists_aggregation_and_metrology_records() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "indicator_1": [2.0],
+        }
+    )
+    prepared, issues = prepare_measurements(raw, _indicator_metadata())
+
+    assert not [issue for issue in issues if bool(issue.blocks_processing)]
+    assert prepared.loc[0, "aggregation_method"] == "primary_channel"
+    assert prepared.loc[0, "aggregation_status"] == "ok"
+    assert prepared.loc[0, "channels_required"] == '["indicator_1"]'
+    assert prepared.attrs["indicator_processing_schema"] == "indicator-processing/2.0"
+    assert len(prepared.attrs["indicator_aggregation_results"]) == 1
+    evaluation = prepared.attrs["metrology_evaluations"][0]
+    assert evaluation["verification_status"] == "valid_at_experiment"
+    assert evaluation["verification_evaluation_date"] == "2026-02-01"
+    assert evaluation["verification_evaluation_rule"]
+
+
+def test_expired_channel_is_not_marked_calibration_confirmed_or_authoritative() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "indicator_1": [2.0],
+        }
+    )
+    metadata = _indicator_metadata(experiment_date="2031-01-01")
+    prepared, issues = prepare_measurements(raw, metadata)
+
+    assert any(
+        issue.code == "indicator_verification_expired_at_experiment"
+        for issue in issues
+    )
+    assert not bool(prepared.loc[0, "indicator_calibration_confirmed"])
+    assert prepared.loc[0, "aggregation_status"] == "blocked_metrology_status"
+    assert pd.isna(prepared.loc[0, "settlement_raw_mm"])
+
+
+def test_reference_used_flag_describes_actual_aggregation_not_raw_presence() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "settlement": [0.25],
+            "indicator_1": [10.0],
+            "reference_indicator": [1.0],
+        }
+    )
+    metadata = _indicator_metadata()
+    metadata["indicator_passports"]["reference_indicator"] = _channel_passport(
+        instrument_id="REF-T1", cumulative_sign=-1.0
+    )
+    prepared, issues = prepare_measurements(raw, metadata)
+
+    assert not [issue for issue in issues if bool(issue.blocks_processing)]
+    assert prepared.loc[0, "aggregation_status"] == "not_applied_direct_settlement"
+    assert not bool(prepared.loc[0, "reference_channel_used"])
+
+
+def test_invalid_auxiliary_indicator_is_nonblocking_for_direct_settlement() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "settlement": [0.25],
+            "indicator_1": ["not-a-number"],
+        }
+    )
+
+    prepared, issues = prepare_measurements(raw, META)
+
+    assert not [issue for issue in issues if bool(issue.blocks_processing)]
+    assert any(
+        issue.code == "invalid_auxiliary_indicator_ignored" for issue in issues
+    )
+    assert prepared.loc[0, "settlement_raw_mm"] == pytest.approx(0.25)
+
+
+def test_invalid_indicator_is_blocking_when_same_test_needs_fallback() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1", "T1"],
+            "stage": [1, 2],
+            "load": [1.0, 2.0],
+            "settlement": [0.25, np.nan],
+            "indicator_1": ["not-a-number", 1.0],
+        }
+    )
+
+    _, issues = prepare_measurements(raw, _indicator_metadata())
+
+    issue = next(issue for issue in issues if issue.code == "invalid_measurement")
+    assert issue.rows == [0]
+    assert issue.column == "indicator_1"
+    assert bool(issue.blocks_processing)
+
+
+def test_no_aggregation_never_falls_back_to_indicator_value() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "indicator_1": [2.0],
+        }
+    )
+    metadata = _indicator_metadata()
+    metadata.update(
+        {
+            "settlement_aggregation": "no_aggregation",
+            "settlement_aggregation_channels": [],
+            "settlement_primary_channel": None,
+        }
+    )
+
+    prepared, issues = prepare_measurements(raw, metadata)
+
+    assert not [issue for issue in issues if bool(issue.blocks_processing)]
+    assert pd.isna(prepared.loc[0, "settlement_raw_mm"])
+    assert prepared.loc[0, "aggregation_status"] == "no_aggregation"
+
+
+def test_verification_issues_are_retained_for_each_channel() -> None:
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "load": [1.0],
+            "indicator_1": [1.0],
+            "indicator_2": [1.0],
+        }
+    )
+    metadata = _indicator_metadata(experiment_date="2031-01-01")
+    second = _channel_passport(instrument_id="IND-T2")
+    metadata["indicator_passports"]["indicator_2"] = second
+    metadata.update(
+        {
+            "settlement_aggregation": "all_channels_mean",
+            "settlement_aggregation_channels": ["indicator_1", "indicator_2"],
+            "settlement_primary_channel": None,
+        }
+    )
+
+    _, issues = prepare_measurements(raw, metadata)
+    expired = [
+        issue
+        for issue in issues
+        if issue.code == "indicator_verification_expired_at_experiment"
+    ]
+
+    assert {issue.column for issue in expired} == {"indicator_1", "indicator_2"}

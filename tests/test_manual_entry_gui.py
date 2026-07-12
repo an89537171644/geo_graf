@@ -131,3 +131,121 @@ def test_valid_manual_demo_can_be_activated_in_common_pipeline() -> None:
     ]
     source = next(item for item in app.sidebar.radio if item.label == "Источник")
     assert source.value == MANUAL_SOURCE
+
+
+def test_gui_copy_to_channels_is_explicit_and_audited() -> None:
+    demo = ROOT / "examples" / "manual_entry_demo.json"
+    app = _open_manual_entry()
+    uploader = next(
+        item
+        for item in app.get("file_uploader")
+        if item.label == "Открыть черновик JSON"
+    )
+    uploader.upload(demo.name, demo.read_bytes(), "application/json")
+    app.run(timeout=120)
+    _button(app, "Загрузить выбранный черновик").click()
+    app.run(timeout=120)
+
+    target = next(
+        item for item in app.multiselect if item.label == "Целевые каналы"
+    )
+    target.set_value(["indicator_2"])
+    reason = next(
+        item for item in app.text_input if item.label == "Причина копирования *"
+    )
+    reason.set_value("установка одинаковой серии с последующей проверкой")
+    _button(app, "Копировать паспорт в каналы").click()
+    app.run(timeout=120)
+
+    assert not app.exception
+    service = app.session_state[MANUAL_SERVICE_KEY]
+    copied = service.draft.passport.indicator_passports["indicator_2"]
+    assert copied is not None
+    assert copied.assignment_status == "review_required"
+    events = [
+        event
+        for event in service.draft.audit_events
+        if event.action == "copy_indicator_passport"
+        and event.entity_id.endswith(":indicator_2")
+    ]
+    assert events
+    assert events[-1].reason == "установка одинаковой серии с последующей проверкой"
+
+
+def test_confirmed_metrology_cannot_change_without_explicit_reason() -> None:
+    demo = ROOT / "examples" / "manual_entry_demo.json"
+    app = _open_manual_entry()
+    uploader = next(
+        item
+        for item in app.get("file_uploader")
+        if item.label == "Открыть черновик JSON"
+    )
+    uploader.upload(demo.name, demo.read_bytes(), "application/json")
+    app.run(timeout=120)
+    _button(app, "Загрузить выбранный черновик").click()
+    app.run(timeout=120)
+
+    instrument = next(
+        item for item in app.text_input if item.label == "ID прибора *"
+    )
+    instrument.set_value("DEMO-IND-CHANGED")
+    _button(app, "Применить паспорт").click()
+    app.run(timeout=120)
+
+    service = app.session_state[MANUAL_SERVICE_KEY]
+    current = service.draft.passport.indicator_passports["indicator_1"]
+    assert current is not None
+    assert current.instrument_id == "DEMO-IND-001"
+    assert any(
+        "укажите причину" in str(item.value).casefold() for item in app.error
+    )
+
+    reason = next(
+        item
+        for item in app.text_input
+        if item.label == "Причина подтверждения метрологии"
+    )
+    reason.set_value("замена идентификатора по паспорту прибора")
+    _button(app, "Применить паспорт").click()
+    app.run(timeout=120)
+
+    service = app.session_state[MANUAL_SERVICE_KEY]
+    changed = service.draft.passport.indicator_passports["indicator_1"]
+    assert changed is not None
+    assert changed.instrument_id == "DEMO-IND-CHANGED"
+    assert any(
+        event.field == "indicator_passports"
+        and event.reason == "замена идентификатора по паспорту прибора"
+        for event in service.draft.audit_events
+    )
+
+
+def test_confirmed_experiment_date_cannot_change_without_explicit_reason() -> None:
+    demo = ROOT / "examples" / "manual_entry_demo.json"
+    app = _open_manual_entry()
+    uploader = next(
+        item
+        for item in app.get("file_uploader")
+        if item.label == "Открыть черновик JSON"
+    )
+    uploader.upload(demo.name, demo.read_bytes(), "application/json")
+    app.run(timeout=120)
+    _button(app, "Загрузить выбранный черновик").click()
+    app.run(timeout=120)
+
+    test_date = next(
+        item
+        for item in app.text_input
+        if item.label == "Дата YYYY-MM-DD (необязательно)"
+    )
+    original_date = str(test_date.value)
+    test_date.set_value("2026-07-12")
+    _button(app, "Применить паспорт").click()
+    app.run(timeout=120)
+
+    service = app.session_state[MANUAL_SERVICE_KEY]
+    assert service.draft.passport.test_date == original_date
+    assert service.draft.passport.metrology_status == "confirmed"
+    assert any(
+        "укажите причину" in str(item.value).casefold() for item in app.error
+    )

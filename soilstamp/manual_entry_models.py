@@ -13,7 +13,8 @@ from uuid import UUID, uuid4
 
 
 MANUAL_DRAFT_SCHEMA_V1_0 = "manual-entry-draft/1.0"
-MANUAL_DRAFT_SCHEMA_VERSION = "manual-entry-draft/1.1"
+MANUAL_DRAFT_SCHEMA_V1_1 = "manual-entry-draft/1.1"
+MANUAL_DRAFT_SCHEMA_VERSION = "manual-entry-draft/1.2"
 MAX_MANUAL_DRAFT_BYTES = 16 * 1024 * 1024
 MAX_MANUAL_DRAFT_ROWS = 100_000
 
@@ -26,6 +27,27 @@ MANUAL_ROW_STATUSES = (
     "instrument_limit",
     "stopped_without_failure",
     "invalid",
+)
+MANUAL_INDICATOR_CHANNELS = (
+    "indicator_1",
+    "indicator_2",
+    "indicator_3",
+    "indicator_4",
+    "reference_indicator",
+)
+MANUAL_VERTICAL_INDICATOR_CHANNELS = MANUAL_INDICATOR_CHANNELS[:4]
+MANUAL_SETTLEMENT_AGGREGATIONS = (
+    "all_channels_mean",
+    "selected_channels_mean",
+    "plane_center",
+    "primary_channel",
+    "no_aggregation",
+)
+MANUAL_SETTLEMENT_MISSING_CHANNEL_POLICIES = ("block", "allow_if_solvable")
+MANUAL_METROLOGY_STATUSES = (
+    "draft",
+    "migration_review_required",
+    "confirmed",
 )
 MANUAL_EDITOR_COLUMNS = (
     "sequence_no",
@@ -41,6 +63,37 @@ MANUAL_EDITOR_COLUMNS = (
     "row_status",
     "comment",
 )
+
+_V1_1_COMMON_INDICATOR_FIELDS = (
+    "dial_mode",
+    "dial_range_mm",
+    "dial_resolution_mm",
+    "dial_correction_factor",
+    "dial_initial_reading",
+    "dial_zero_correction_mm",
+    "dial_max_increment_mm",
+    "dial_reverse_tolerance_mm",
+    "dial_travel_range_mm",
+    "indicator_type",
+    "indicator_serial_numbers",
+    "verification_date",
+    "verification_valid_until",
+)
+_V1_2_PASSPORT_FIELDS = (
+    "indicator_passports",
+    "legacy_common_indicator_passport",
+    "settlement_aggregation",
+    "settlement_aggregation_channels",
+    "settlement_primary_channel",
+    "settlement_missing_channel_policy",
+    "metrology_status",
+)
+
+
+def empty_manual_indicator_passports() -> dict[str, None]:
+    """Return the exact channel registry for a new unassigned draft."""
+
+    return {channel: None for channel in MANUAL_INDICATOR_CHANNELS}
 
 
 def utc_now_iso() -> str:
@@ -118,34 +171,69 @@ def _require_json_value(value: Any, *, field_name: str) -> None:
 
 
 def migrate_manual_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a lossless copy upgraded to the current manual-draft schema.
+    """Return a lossless copy upgraded through every manual-draft schema.
 
-    Version 1.0 did not have an explicit ``pair_id``.  Its
-    ``baseline_group`` value is deliberately retained only as the name of the
-    control series and is never treated as evidence of pairing.
+    Version 1.0 did not have an explicit ``pair_id``.  Version 1.1 stored one
+    common indicator passport.  That common object is retained verbatim as
+    legacy evidence in 1.2, but it is never assigned to channels implicitly.
+    Automatic migration does not append audit events because it has no human
+    author or engineering justification.
     """
 
     if not isinstance(payload, dict):
         raise ValueError("Черновик должен быть JSON-объектом.")
     migrated = deepcopy(payload)
     version = migrated.get("schema_version")
-    if version == MANUAL_DRAFT_SCHEMA_VERSION:
-        return migrated
-    if version != MANUAL_DRAFT_SCHEMA_V1_0:
-        raise ValueError(
-            f"Неподдерживаемая версия черновика {version!r}; "
-            f"ожидается {MANUAL_DRAFT_SCHEMA_VERSION}."
-        )
-    passport = migrated.get("passport")
-    if not isinstance(passport, dict):
-        raise ValueError("Поле passport должно быть JSON-объектом.")
-    if "pair_id" in passport:
-        raise ValueError(
-            "passport.pair_id не входил в схему manual-entry-draft/1.0; "
-            "скрытая замена при миграции запрещена."
-        )
-    passport["pair_id"] = None
-    migrated["schema_version"] = MANUAL_DRAFT_SCHEMA_VERSION
+    while version != MANUAL_DRAFT_SCHEMA_VERSION:
+        if version not in {MANUAL_DRAFT_SCHEMA_V1_0, MANUAL_DRAFT_SCHEMA_V1_1}:
+            raise ValueError(
+                f"Неподдерживаемая версия черновика {version!r}; "
+                f"ожидается {MANUAL_DRAFT_SCHEMA_VERSION}."
+            )
+        passport = migrated.get("passport")
+        if not isinstance(passport, dict):
+            raise ValueError("Поле passport должно быть JSON-объектом.")
+
+        if version == MANUAL_DRAFT_SCHEMA_V1_0:
+            if "pair_id" in passport:
+                raise ValueError(
+                    "passport.pair_id не входил в схему manual-entry-draft/1.0; "
+                    "скрытая замена при миграции запрещена."
+                )
+            passport["pair_id"] = None
+            migrated["schema_version"] = MANUAL_DRAFT_SCHEMA_V1_1
+            version = MANUAL_DRAFT_SCHEMA_V1_1
+            continue
+
+        if version == MANUAL_DRAFT_SCHEMA_V1_1:
+            collisions = sorted(set(_V1_2_PASSPORT_FIELDS) & set(passport))
+            if collisions:
+                raise ValueError(
+                    "Паспорт manual-entry-draft/1.1 содержит поля схемы 1.2 "
+                    f"{collisions!r}; скрытая перезапись при миграции запрещена."
+                )
+            missing_legacy = sorted(
+                set(_V1_1_COMMON_INDICATOR_FIELDS) - set(passport)
+            )
+            if missing_legacy:
+                raise ValueError(
+                    "Паспорт manual-entry-draft/1.1 неполон; отсутствуют общие "
+                    f"метрологические поля {missing_legacy!r}."
+                )
+            passport["legacy_common_indicator_passport"] = {
+                name: passport.pop(name)
+                for name in _V1_1_COMMON_INDICATOR_FIELDS
+            }
+            passport["indicator_passports"] = empty_manual_indicator_passports()
+            passport["settlement_aggregation"] = "no_aggregation"
+            passport["settlement_aggregation_channels"] = []
+            passport["settlement_primary_channel"] = None
+            passport["settlement_missing_channel_policy"] = "block"
+            passport["metrology_status"] = "migration_review_required"
+            migrated["schema_version"] = MANUAL_DRAFT_SCHEMA_VERSION
+            version = MANUAL_DRAFT_SCHEMA_VERSION
+            continue
+
     return migrated
 
 
@@ -211,6 +299,161 @@ class ManualReinforcement:
 
 
 @dataclass(slots=True)
+class ManualLegacyIndicatorCommon:
+    """Verbatim version-1.1 common passport retained only for review."""
+
+    dial_mode: str = ""
+    dial_range_mm: str | None = None
+    dial_resolution_mm: str | None = None
+    dial_correction_factor: str | None = None
+    dial_initial_reading: str | None = None
+    dial_zero_correction_mm: str | None = None
+    dial_max_increment_mm: str | None = None
+    dial_reverse_tolerance_mm: str | None = None
+    dial_travel_range_mm: str | None = None
+    indicator_type: str = ""
+    indicator_serial_numbers: list[str] = field(default_factory=list)
+    verification_date: str = ""
+    verification_valid_until: str = ""
+
+    @classmethod
+    def from_dict(
+        cls, payload: dict[str, Any] | None
+    ) -> "ManualLegacyIndicatorCommon":
+        if not isinstance(payload, dict):
+            raise ValueError(
+                "passport.legacy_common_indicator_passport должен быть JSON-объектом."
+            )
+        _require_exact_keys(
+            payload,
+            set(cls.__dataclass_fields__),
+            object_name="passport.legacy_common_indicator_passport",
+        )
+        for name in (
+            "dial_mode",
+            "indicator_type",
+            "verification_date",
+            "verification_valid_until",
+        ):
+            if not isinstance(payload[name], str):
+                raise ValueError(
+                    f"passport.legacy_common_indicator_passport.{name} должен быть строкой."
+                )
+        for name in (
+            "dial_range_mm",
+            "dial_resolution_mm",
+            "dial_correction_factor",
+            "dial_initial_reading",
+            "dial_zero_correction_mm",
+            "dial_max_increment_mm",
+            "dial_reverse_tolerance_mm",
+            "dial_travel_range_mm",
+        ):
+            _require_text_or_none(
+                payload[name],
+                field_name=f"passport.legacy_common_indicator_passport.{name}",
+            )
+        serials = payload["indicator_serial_numbers"]
+        if not isinstance(serials, list) or any(
+            not isinstance(value, str) for value in serials
+        ):
+            raise ValueError(
+                "passport.legacy_common_indicator_passport.indicator_serial_numbers "
+                "должен быть массивом строк."
+            )
+        return cls(
+            **{
+                name: payload[name]
+                for name in cls.__dataclass_fields__
+                if name != "indicator_serial_numbers"
+            },
+            indicator_serial_numbers=list(serials),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ManualIndicatorPassport:
+    """Raw, channel-specific metrological passport stored in a manual draft."""
+
+    type: str = ""
+    serial_number: str = ""
+    instrument_id: str | None = None
+    range_mm: str | None = None
+    division_mm: str | None = None
+    correction_factor: str | None = None
+    mode: str = ""
+    initial_reading: str | None = None
+    initial_turn: int | None = None
+    zero_correction_mm: str | None = None
+    max_increment_mm: str | None = None
+    reverse_tolerance_mm: str | None = None
+    travel_range_mm: str | None = None
+    verification_date: str = ""
+    verification_valid_until: str = ""
+    x_mm: str | None = None
+    y_mm: str | None = None
+    cumulative_sign: str | None = None
+    assignment_status: str = "draft"
+
+    @classmethod
+    def from_dict(
+        cls, payload: dict[str, Any] | None, *, channel: str = "indicator"
+    ) -> "ManualIndicatorPassport":
+        if not isinstance(payload, dict):
+            raise ValueError(f"passport.indicator_passports.{channel} должен быть JSON-объектом.")
+        _require_exact_keys(
+            payload,
+            set(cls.__dataclass_fields__),
+            object_name=f"passport.indicator_passports.{channel}",
+        )
+        for name in (
+            "type",
+            "serial_number",
+            "mode",
+            "verification_date",
+            "verification_valid_until",
+            "assignment_status",
+        ):
+            if not isinstance(payload[name], str):
+                raise ValueError(
+                    f"passport.indicator_passports.{channel}.{name} должен быть строкой."
+                )
+        for name in (
+            "instrument_id",
+            "range_mm",
+            "division_mm",
+            "correction_factor",
+            "initial_reading",
+            "zero_correction_mm",
+            "max_increment_mm",
+            "reverse_tolerance_mm",
+            "travel_range_mm",
+            "x_mm",
+            "y_mm",
+            "cumulative_sign",
+        ):
+            _require_text_or_none(
+                payload[name],
+                field_name=f"passport.indicator_passports.{channel}.{name}",
+            )
+        initial_turn = payload["initial_turn"]
+        if initial_turn is not None and (
+            isinstance(initial_turn, bool) or not isinstance(initial_turn, int)
+        ):
+            raise ValueError(
+                f"passport.indicator_passports.{channel}.initial_turn "
+                "должен быть целым числом или null."
+            )
+        return cls(**payload)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
 class ManualPassport:
     project_name: str = ""
     series_name: str = ""
@@ -237,20 +480,16 @@ class ManualPassport:
     load_zero: str | None = None
     lever_ratio: str | None = None
     settlement_unit: str = "mm"
-    dial_mode: str = ""
-    dial_range_mm: str | None = None
-    dial_resolution_mm: str | None = None
-    dial_correction_factor: str | None = None
-    dial_initial_reading: str | None = None
-    dial_zero_correction_mm: str | None = None
-    dial_max_increment_mm: str | None = None
-    dial_reverse_tolerance_mm: str | None = None
-    dial_travel_range_mm: str | None = None
-    indicator_type: str = ""
-    indicator_serial_numbers: list[str] = field(default_factory=list)
-    verification_date: str = ""
-    verification_valid_until: str = ""
     number_of_indicators: int | None = None
+    indicator_passports: dict[str, ManualIndicatorPassport | None] = field(
+        default_factory=empty_manual_indicator_passports
+    )
+    legacy_common_indicator_passport: ManualLegacyIndicatorCommon | None = None
+    settlement_aggregation: str = "no_aggregation"
+    settlement_aggregation_channels: list[str] = field(default_factory=list)
+    settlement_primary_channel: str | None = None
+    settlement_missing_channel_policy: str = "block"
+    metrology_status: str = "draft"
     comment: str = ""
     reinforcement: ManualReinforcement = field(default_factory=ManualReinforcement)
 
@@ -284,10 +523,9 @@ class ManualPassport:
             "load_kind",
             "load_unit",
             "settlement_unit",
-            "dial_mode",
-            "indicator_type",
-            "verification_date",
-            "verification_valid_until",
+            "settlement_aggregation",
+            "settlement_missing_channel_policy",
+            "metrology_status",
             "comment",
         )
         for name in text_fields:
@@ -300,14 +538,7 @@ class ManualPassport:
             "load_factor",
             "load_zero",
             "lever_ratio",
-            "dial_range_mm",
-            "dial_resolution_mm",
-            "dial_correction_factor",
-            "dial_initial_reading",
-            "dial_zero_correction_mm",
-            "dial_max_increment_mm",
-            "dial_reverse_tolerance_mm",
-            "dial_travel_range_mm",
+            "settlement_primary_channel",
         )
         for name in optional_text_fields:
             _require_text_or_none(payload[name], field_name=f"passport.{name}")
@@ -320,25 +551,103 @@ class ManualPassport:
             raise ValueError(
                 "passport.number_of_indicators должен быть целым числом или null."
             )
-        serials = payload["indicator_serial_numbers"]
-        if not isinstance(serials, list) or any(
-            not isinstance(value, str) for value in serials
+        if payload["settlement_aggregation"] not in MANUAL_SETTLEMENT_AGGREGATIONS:
+            raise ValueError(
+                "passport.settlement_aggregation должен быть одним из: "
+                + ", ".join(MANUAL_SETTLEMENT_AGGREGATIONS)
+                + "."
+            )
+        if (
+            payload["settlement_missing_channel_policy"]
+            not in MANUAL_SETTLEMENT_MISSING_CHANNEL_POLICIES
         ):
             raise ValueError(
-                "passport.indicator_serial_numbers должен быть массивом строк."
+                "passport.settlement_missing_channel_policy должен быть одним из: "
+                + ", ".join(MANUAL_SETTLEMENT_MISSING_CHANNEL_POLICIES)
+                + "."
             )
+        if payload["metrology_status"] not in MANUAL_METROLOGY_STATUSES:
+            raise ValueError(
+                "passport.metrology_status должен быть одним из: "
+                + ", ".join(MANUAL_METROLOGY_STATUSES)
+                + "."
+            )
+
+        aggregation_channels = payload["settlement_aggregation_channels"]
+        if not isinstance(aggregation_channels, list) or any(
+            not isinstance(value, str) for value in aggregation_channels
+        ):
+            raise ValueError(
+                "passport.settlement_aggregation_channels должен быть массивом строк."
+            )
+        if any(
+            value not in MANUAL_VERTICAL_INDICATOR_CHANNELS
+            for value in aggregation_channels
+        ):
+            raise ValueError(
+                "passport.settlement_aggregation_channels содержит неизвестный "
+                "вертикальный канал."
+            )
+        if len(set(aggregation_channels)) != len(aggregation_channels):
+            raise ValueError(
+                "passport.settlement_aggregation_channels не должен содержать повторы."
+            )
+        primary = payload["settlement_primary_channel"]
+        if primary is not None and primary not in MANUAL_VERTICAL_INDICATOR_CHANNELS:
+            raise ValueError(
+                "passport.settlement_primary_channel должен быть вертикальным "
+                "каналом indicator_1..4 или null."
+            )
+
+        indicator_payload = payload["indicator_passports"]
+        if not isinstance(indicator_payload, dict):
+            raise ValueError("passport.indicator_passports должен быть JSON-объектом.")
+        _require_exact_keys(
+            indicator_payload,
+            set(MANUAL_INDICATOR_CHANNELS),
+            object_name="passport.indicator_passports",
+        )
+        indicator_passports = {
+            channel: (
+                None
+                if indicator_payload[channel] is None
+                else ManualIndicatorPassport.from_dict(
+                    indicator_payload[channel], channel=channel
+                )
+            )
+            for channel in MANUAL_INDICATOR_CHANNELS
+        }
+        legacy_payload = payload["legacy_common_indicator_passport"]
+        legacy = (
+            None
+            if legacy_payload is None
+            else ManualLegacyIndicatorCommon.from_dict(legacy_payload)
+        )
         return cls(
             **{name: payload[name] for name in text_fields},
             is_reinforced=payload["is_reinforced"],
             **{name: payload[name] for name in optional_text_fields},
-            indicator_serial_numbers=list(serials),
             number_of_indicators=number,
+            indicator_passports=indicator_passports,
+            legacy_common_indicator_passport=legacy,
+            settlement_aggregation_channels=list(aggregation_channels),
             reinforcement=ManualReinforcement.from_dict(payload["reinforcement"]),
         )
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["reinforcement"] = self.reinforcement.to_dict()
+        payload["legacy_common_indicator_passport"] = (
+            self.legacy_common_indicator_passport.to_dict()
+            if self.legacy_common_indicator_passport is not None
+            else None
+        )
+        payload["indicator_passports"] = {
+            channel: (
+                passport.to_dict() if passport is not None else None
+            )
+            for channel, passport in self.indicator_passports.items()
+        }
         return payload
 
 

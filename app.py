@@ -47,6 +47,7 @@ from soilstamp.io import (
     validate_import_metadata_consistency,
 )
 from soilstamp.indicators import (
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
@@ -63,6 +64,7 @@ from soilstamp.plotting import export_figure, plot_curves, plot_stamp_schematic
 from soilstamp.provenance import (
     build_provenance,
     effective_conversion_parameters,
+    metrology_evaluations_from_passports,
     passport_completeness,
     validate_project_metadata,
     value_sha256,
@@ -712,6 +714,10 @@ try:
     indicator_processing_audit = indicator_audit_frame(base_prepared)
     indicator_processing_events = indicator_event_frame(base_prepared)
     indicator_calibration_parameters = indicator_passport_frame(base_prepared)
+    indicator_aggregation_results = indicator_aggregation_frame(base_prepared)
+    input_context["provenance"].metrology_evaluations = (
+        metrology_evaluations_from_passports(indicator_calibration_parameters)
+    )
     # Pandas deep-copies attrs through most analysis operations.  Keep the
     # sizeable indicator artefacts in dedicated frames and use an attrs-free
     # working layer; they are reattached only to the report snapshot below.
@@ -777,6 +783,9 @@ selected_indicator_events = _scope_indicator_table(
 )
 selected_indicator_passports = _scope_indicator_table(
     indicator_calibration_parameters, selected_tests
+)
+selected_indicator_aggregation = _scope_indicator_table(
+    indicator_aggregation_results, selected_tests
 )
 
 st.title(f"Soil Stamp Antonov {VERSION}")
@@ -878,6 +887,13 @@ with tabs[0]:
             "zero_correction_mm",
             "verification_date",
             "verification_valid_until",
+            "verification_status",
+            "verification_evaluation_date",
+            "verification_evaluation_date_source",
+            "verification_evaluation_rule",
+            "x_mm",
+            "y_mm",
+            "assignment_status",
             "max_increment_mm",
             "reverse_tolerance_mm",
             "travel_range_mm",
@@ -971,6 +987,47 @@ with tabs[0]:
                     width="stretch",
                     hide_index=True,
                 )
+    st.subheader("Агрегация осадки")
+    st.caption(
+        "Фиксированный состав required/used/missing и результат политики для каждой строки."
+    )
+    if selected_indicator_aggregation.empty:
+        st.info("Осадка по индикаторным каналам для выбранных испытаний не формировалась.")
+    else:
+        aggregation_columns = [
+            "test_id",
+            "row_index",
+            "sequence_index",
+            "aggregation_method",
+            "channels_required",
+            "channels_used",
+            "missing_channels",
+            "aggregation_status",
+            "plane_rank",
+            "plane_residual_rms_mm",
+            "tilt_magnitude_mm_per_mm",
+            "tilt_direction_deg",
+            "tilt_direction_resolved",
+        ]
+        st.dataframe(
+            _display_safe_frame(
+                selected_indicator_aggregation[
+                    [
+                        column
+                        for column in aggregation_columns
+                        if column in selected_indicator_aggregation
+                    ]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.download_button(
+            "Скачать indicator_aggregation_results.csv",
+            selected_indicator_aggregation.to_csv(index=False).encode("utf-8-sig"),
+            "indicator_aggregation_results.csv",
+            "text/csv",
+        )
     st.subheader("Provenance")
     st.json(input_context["provenance"].to_dict(), expanded=False)
     if len(input_context["raw_cells"]):
@@ -1750,6 +1807,9 @@ with tabs[6]:
             metadata_source=input_context["metadata_file_bytes"],
             config=processing_config,
             project_root=BASE_DIR,
+            metrology_evaluations=metrology_evaluations_from_passports(
+                selected_indicator_passports
+            ),
         )
     processing_provenance = st.session_state.processing_provenance[processing_config_key]
     report_prepared = filtered.copy(deep=False)
@@ -1761,6 +1821,9 @@ with tabs[6]:
     )
     report_prepared.attrs["indicator_calibration_parameters"] = (
         selected_indicator_passports.to_dict(orient="records")
+    )
+    report_prepared.attrs["indicator_aggregation_results"] = (
+        selected_indicator_aggregation.to_dict(orient="records")
     )
     report = build_markdown_report(
         metadata=metadata,
@@ -1802,6 +1865,7 @@ with tabs[6]:
         "indicator_processing_audit": selected_indicator_audit,
         "indicator_processing_events": selected_indicator_events,
         "indicator_calibration_parameters": selected_indicator_passports,
+        "indicator_aggregation_results": selected_indicator_aggregation,
     }
     manual_draft_payload = input_context.get("manual_draft")
     if isinstance(manual_draft_payload, dict):

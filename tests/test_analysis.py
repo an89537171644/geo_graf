@@ -500,12 +500,60 @@ def test_tilt_direction_is_undefined_below_indicator_resolution() -> None:
         "stamp_shape": "custom",
         "stamp_area_m2": 0.1,
         "indicator_resolution_mm": 0.01,
-        "indicator_mode": "direct_displacement",
-        "indicator_unit": "mm",
-        "indicator_calibration_factor": 1.0,
-        "indicator_sign": 1.0,
-        "reference_sign": -1.0,
-        "indicator_instrument_id": "IND-T1",
+        "experiment_date": "2026-02-01",
+        "metrology_status": "confirmed",
+        "settlement_aggregation": "plane_center",
+        "settlement_aggregation_channels": [
+            "indicator_1",
+            "indicator_2",
+            "indicator_3",
+        ],
+        "settlement_primary_channel": None,
+        "settlement_missing_channel_policy": "block",
+        "indicator_passports": {
+            name: {
+                "type": "ИЧ-10",
+                "serial_number": name,
+                "instrument_id": name,
+                "range_mm": 10.0,
+                "division_mm": 0.01,
+                "correction_factor": 1.0,
+                "verification_date": "2026-01-01",
+                "verification_valid_until": "2030-01-01",
+                "mode": "cumulative_settlement",
+                "initial_reading": None,
+                "initial_turn": 0,
+                "zero_correction_mm": 0.0,
+                "max_increment_mm": None,
+                "reverse_tolerance_mm": 0.02,
+                "travel_range_mm": 50.0,
+                "cumulative_sign": -1.0
+                if name == "reference_indicator"
+                else 1.0,
+                **(
+                    {
+                        "x_mm": {
+                            "indicator_1": 0.0,
+                            "indicator_2": 100.0,
+                            "indicator_3": 0.0,
+                        }[name],
+                        "y_mm": {
+                            "indicator_1": 0.0,
+                            "indicator_2": 0.0,
+                            "indicator_3": 100.0,
+                        }[name],
+                    }
+                    if name != "reference_indicator"
+                    else {}
+                ),
+            }
+            for name in (
+                "indicator_1",
+                "indicator_2",
+                "indicator_3",
+                "reference_indicator",
+            )
+        },
     }
     frame, _ = prepare_measurements(raw, metadata)
     tilt = center_and_tilt(
@@ -518,3 +566,63 @@ def test_tilt_direction_is_undefined_below_indicator_resolution() -> None:
     ).iloc[0]
     assert not bool(tilt["tilt_direction_resolved"])
     assert pd.isna(tilt["tilt_direction_deg"])
+
+
+def test_center_and_tilt_uses_fixed_channels_and_explicit_missing_policy() -> None:
+    frame = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "indicator_1_settlement_mm": [0.0],
+            "indicator_2_settlement_mm": [1.0],
+            "indicator_3_settlement_mm": [2.0],
+            "indicator_4_settlement_mm": [np.nan],
+            "indicator_resolution_mm": [0.01],
+            "indicator_calibration_confirmed": [True],
+        }
+    )
+    positions = {
+        "indicator_1": (-100.0, 0.0),
+        "indicator_2": (0.0, 100.0),
+        "indicator_3": (100.0, 0.0),
+        "indicator_4": (0.0, -100.0),
+    }
+
+    blocked = center_and_tilt(frame, positions, channels=list(positions)).iloc[0]
+    allowed = center_and_tilt(
+        frame,
+        positions,
+        channels=list(positions),
+        missing_channel_policy="allow_if_solvable",
+    ).iloc[0]
+
+    assert blocked["aggregation_status"] == "blocked_missing_channels"
+    assert pd.isna(blocked["center_settlement_mm"])
+    assert allowed["aggregation_status"] == "ok"
+    assert allowed["plane_rank"] == 3
+    assert allowed["missing_channels"] == '["indicator_4"]'
+
+    unconfirmed = frame.copy()
+    unconfirmed["indicator_calibration_confirmed"] = False
+    assert center_and_tilt(
+        unconfirmed, positions, channels=list(positions)
+    ).empty
+
+
+def test_center_and_tilt_does_not_infer_basis_from_explicit_empty_channels() -> None:
+    frame = pd.DataFrame(
+        {
+            "test_id": ["T1"],
+            "stage": [1],
+            "indicator_1_settlement_mm": [0.0],
+            "indicator_2_settlement_mm": [1.0],
+            "indicator_3_settlement_mm": [2.0],
+        }
+    )
+    positions = {
+        "indicator_1": (0.0, 0.0),
+        "indicator_2": (100.0, 0.0),
+        "indicator_3": (0.0, 100.0),
+    }
+
+    assert center_and_tilt(frame, positions, channels=[]).empty

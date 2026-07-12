@@ -98,6 +98,9 @@ def test_cli_approved_antonov_matches_direct_api_with_provenance(
 
     bundle = run(args)
     assert bundle.is_file()
+    assert (output / "indicator_aggregation_results.csv").is_file()
+    provenance = json.loads((output / "provenance.json").read_text(encoding="utf-8"))
+    assert "metrology_evaluations" in provenance
     cli_table = pd.read_csv(output / "moduli.csv")
     cli_regression = cli_table.loc[cli_table["method"].eq("E_regression")].iloc[0]
 

@@ -31,13 +31,24 @@ from .data import (
 )
 from .io import parse_decimal, read_protocol, read_protocol_excel
 from .indicators import (
+    INDICATOR_AGGREGATION_COLUMNS,
+    SETTLEMENT_AGGREGATIONS,
+    SETTLEMENT_MISSING_CHANNEL_POLICIES,
+    evaluate_indicator_verification,
+    fit_indicator_plane,
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
     process_indicator_frame,
     resolve_indicator_passport,
+    resolve_settlement_aggregation,
 )
-from .provenance import build_provenance, passport_completeness
+from .provenance import (
+    build_provenance,
+    metrology_evaluations_from_passports,
+    passport_completeness,
+)
 from .manual_entry_adapter import (
     ManualExperimentSource,
     ManualInputBundle,
@@ -45,9 +56,12 @@ from .manual_entry_adapter import (
 )
 from .manual_entry_models import (
     MANUAL_DRAFT_SCHEMA_V1_0,
+    MANUAL_DRAFT_SCHEMA_V1_1,
     MANUAL_DRAFT_SCHEMA_VERSION,
     ManualAuditEvent,
     ManualDraft,
+    ManualIndicatorPassport,
+    ManualLegacyIndicatorCommon,
     ManualPassport,
     ManualPoint,
     ManualReinforcement,
@@ -85,10 +99,14 @@ __all__ = [
     "ExperimentSource",
     "IndicatorPassport",
     "IndicatorProcessingResult",
+    "INDICATOR_AGGREGATION_COLUMNS",
     "ManualAuditEvent",
     "MANUAL_DRAFT_SCHEMA_V1_0",
+    "MANUAL_DRAFT_SCHEMA_V1_1",
     "MANUAL_DRAFT_SCHEMA_VERSION",
     "ManualDraft",
+    "ManualIndicatorPassport",
+    "ManualLegacyIndicatorCommon",
     "ManualExperimentSource",
     "ManualInputBundle",
     "ManualPassport",
@@ -101,10 +119,13 @@ __all__ = [
     "ModulusResolution",
     "PairingResolution",
     "failure_summary",
+    "evaluate_indicator_verification",
     "fit_segmented_pcr",
+    "fit_indicator_plane",
     "group_mean_curve",
     "hysteresis_metrics",
     "indicator_audit_frame",
+    "indicator_aggregation_frame",
     "indicator_event_frame",
     "indicator_passport_frame",
     "get_modulus_profile",
@@ -117,6 +138,7 @@ __all__ = [
     "RawCell",
     "RawRow",
     "build_provenance",
+    "metrology_evaluations_from_passports",
     "adapt_manual_draft",
     "parse_decimal",
     "passport_completeness",
@@ -126,8 +148,11 @@ __all__ = [
     "read_protocol",
     "read_protocol_excel",
     "resolve_indicator_passport",
+    "resolve_settlement_aggregation",
     "resolve_pairing_design",
     "resolve_modulus_method",
+    "SETTLEMENT_AGGREGATIONS",
+    "SETTLEMENT_MISSING_CHANNEL_POLICIES",
     "validate_measurements",
     "validate_manual_draft",
 ]

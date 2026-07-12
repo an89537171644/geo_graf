@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from .indicators import (
+    INDICATOR_PROCESSING_SCHEMA,
     INDICATOR_MODES,
     canonical_indicator_mode,
     process_indicator_frame,
@@ -239,12 +240,12 @@ def _indicator_instrument_ids(metadata: dict[str, Any]) -> list[str]:
         for item in container.values():
             if not isinstance(item, dict):
                 continue
-            identifier = item.get("instrument_id") or item.get("serial_number")
+            identifier = item.get("instrument_id")
             if identifier is not None and str(identifier).strip():
                 identifiers.append(str(identifier).strip())
     common = metadata.get("indicator_passport")
     if isinstance(common, dict):
-        identifier = common.get("instrument_id") or common.get("serial_number")
+        identifier = common.get("instrument_id")
         if identifier is not None and str(identifier).strip():
             identifiers.append(str(identifier).strip())
     return list(dict.fromkeys(value for value in identifiers if value))
@@ -290,19 +291,8 @@ def _indicator_calibration_parameters(
             and isinstance(metadata[name].get("reference_indicator"), dict)
             for name in ("indicator_passports", "indicator_channels")
         )
-        try:
-            reference_sign = float(metadata.get("reference_sign"))
-        except (TypeError, ValueError):
-            reference_sign = None
-        reference_valid = (
-            not reference_used
-            or reference_passport
-            or (
-                reference_sign is not None
-                and math.isfinite(reference_sign)
-                and math.isclose(abs(reference_sign), 1.0)
-            )
-        )
+        reference_sign = None
+        reference_valid = not reference_used or reference_passport
         instrument_ids = _indicator_instrument_ids(metadata)
         confirmed = bool(
             mode in INDICATOR_MODES
@@ -355,14 +345,7 @@ def _indicator_calibration_parameters(
         reference_sign = None
     instrument_ids = _indicator_instrument_ids(metadata)
     sign_valid = sign is not None and math.isfinite(sign) and math.isclose(abs(sign), 1.0)
-    reference_valid = (
-        not reference_used
-        or (
-            reference_sign is not None
-            and math.isfinite(reference_sign)
-            and math.isclose(abs(reference_sign), 1.0)
-        )
-    )
+    reference_valid = not reference_used
     confirmed = bool(
         mode in _SUPPORTED_PRECALIBRATED_INDICATOR_MODES
         and scale_to_mm is not None
@@ -456,6 +439,16 @@ def validate_measurements(
                 "Нужен settlement или хотя бы один столбец indicator_1..4.",
             )
         )
+    supplied_missing = (
+        pd.to_numeric(frame["settlement"], errors="coerce").isna()
+        if "settlement" in frame
+        else pd.Series(True, index=frame.index)
+    )
+    test_ids_for_measurement = frame["test_id"].astype("string")
+    test_requires_indicator = pd.Series(False, index=frame.index)
+    for test_id in test_ids_for_measurement.dropna().unique():
+        mask = test_ids_for_measurement == test_id
+        test_requires_indicator.loc[mask] = bool(supplied_missing.loc[mask].any())
     numeric_measurement_columns = [
         column
         for column in [
@@ -474,21 +467,33 @@ def validate_measurements(
         numeric = pd.to_numeric(original, errors="coerce")
         provided = original.notna() & original.astype(str).str.strip().ne("")
         invalid = provided & ~np.isfinite(numeric)
-        if invalid.any():
+        blocking_invalid = (
+            invalid
+            if column == "settlement"
+            else invalid & test_requires_indicator
+        )
+        auxiliary_invalid = invalid & ~blocking_invalid
+        if blocking_invalid.any():
             issues.append(
                 ValidationIssue(
                     "error",
                     "invalid_measurement",
                     f"{column} должен содержать только конечные числа или пустые значения.",
-                    rows=frame.index[invalid].tolist(),
+                    rows=frame.index[blocking_invalid].tolist(),
+                    column=column,
+                )
+            )
+        if auxiliary_invalid.any():
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    "invalid_auxiliary_indicator_ignored",
+                    f"Нечисловые auxiliary-значения {column} сохранены как raw и не использованы: прямая settlement авторитетна.",
+                    rows=frame.index[auxiliary_invalid].tolist(),
+                    column=column,
                 )
             )
     indicator_columns = _indicator_columns(frame)
-    supplied_missing = (
-        pd.to_numeric(frame["settlement"], errors="coerce").isna()
-        if "settlement" in frame
-        else pd.Series(True, index=frame.index)
-    )
     indicator_present = (
         frame[indicator_columns]
         .apply(pd.to_numeric, errors="coerce")
@@ -654,35 +659,17 @@ def validate_measurements(
                 )
                 if reference_has_passport:
                     pass
-                elif explicit.get("reference_sign") is None:
+                else:
                     issues.append(
                         ValidationIssue(
                             "error",
-                            "missing_indicator_calibration_metadata",
-                            "Для используемого reference_indicator нужно явно задать reference_sign.",
+                            "missing_reference_indicator_passport",
+                            "Для используемого reference_indicator нужен собственный явный поканальный паспорт.",
                             test_id=test_id,
                             rows=rows,
-                            column="reference_sign",
+                            column="reference_indicator",
                         )
                     )
-                else:
-                    reference_sign = calibration["reference_sign"]
-                    if not (
-                        reference_sign is not None
-                        and math.isfinite(reference_sign)
-                        and math.isclose(abs(reference_sign), 1.0)
-                    ):
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "invalid_indicator_sign",
-                                "reference_sign должен быть равен +1 или -1.",
-                                test_id=test_id,
-                                rows=rows,
-                                column="reference_sign",
-                                raw_value=explicit.get("reference_sign"),
-                            )
-                        )
         elif auxiliary.any() and not calibration["confirmed"]:
             issues.append(
                 ValidationIssue(
@@ -942,6 +929,8 @@ def validate_measurements(
         duplicate = any(
             item.code == indicator_issue.code
             and str(item.test_id or "") == str(indicator_issue.test_id or "")
+            and str(item.column or "") == str(indicator_issue.column or "")
+            and sorted(item.rows) == sorted(indicator_issue.rows)
             for item in issues
         )
         if not duplicate:
@@ -951,40 +940,6 @@ def validate_measurements(
 
 def _indicator_columns(frame: pd.DataFrame) -> list[str]:
     return [f"indicator_{index}" for index in range(1, 5) if f"indicator_{index}" in frame]
-
-
-def _raw_settlement_series(
-    frame: pd.DataFrame,
-    metadata: dict[str, Any],
-    *,
-    indicator_calibration: dict[str, Any] | None = None,
-) -> pd.Series:
-    factor = _settlement_factor(metadata)
-    if "settlement" in frame:
-        supplied = pd.to_numeric(frame["settlement"], errors="coerce") * factor
-    else:
-        supplied = pd.Series(np.nan, index=frame.index, dtype=float)
-    columns = _indicator_columns(frame)
-    if not columns or not indicator_calibration or not indicator_calibration.get("confirmed"):
-        return supplied
-    values = frame[columns].apply(pd.to_numeric, errors="coerce")
-    indicator_scale = float(indicator_calibration["scale_to_mm"])
-    calibration_factor = float(indicator_calibration["factor"])
-    indicator_sign = float(indicator_calibration["sign"])
-    calculated = (
-        values.mean(axis=1, skipna=True)
-        * indicator_sign
-        * indicator_scale
-        * calibration_factor
-    )
-    if indicator_calibration.get("reference_used") and "reference_indicator" in frame:
-        reference = (
-            pd.to_numeric(frame["reference_indicator"], errors="coerce")
-            * indicator_scale
-            * calibration_factor
-        )
-        calculated = calculated + float(indicator_calibration["reference_sign"]) * reference
-    return supplied.where(supplied.notna(), calculated)
 
 
 def classify_branches(
@@ -1048,7 +1003,7 @@ def prepare_measurements(
             metadata if isinstance(metadata, dict) else {}, strict=True
         )
     issues = [*project_issues, *validate_measurements(frame, metadata)]
-    if any(item.level == "error" for item in issues):
+    if any(bool(item.blocks_processing) for item in issues):
         return frame.copy(deep=True), issues
     result = frame.copy(deep=True).reset_index(drop=True)
     if "source_row" not in result:
@@ -1101,12 +1056,26 @@ def prepare_measurements(
         indicator_calibration = _indicator_calibration_parameters(
             explicit, reference_used=reference_used
         )
+        aggregation_rows_for_test = [
+            row
+            for row in indicator_processing.aggregation_rows
+            if str(row.get("test_id")) == str(test_id)
+        ]
+        required_channels: set[str] = set()
+        if aggregation_rows_for_test:
+            try:
+                required_channels = set(
+                    json.loads(aggregation_rows_for_test[0]["channels_required"])
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                required_channels = set()
         effective_passports = [
             row
             for row in indicator_processing.passport_rows
             if str(row.get("test_id")) == str(test_id)
             and str(row.get("channel", "")).startswith("indicator_")
             and str(row.get("channel")) != "reference_indicator"
+            and str(row.get("channel")) in required_channels
         ]
         if effective_passports:
             modes = {str(row.get("mode")) for row in effective_passports}
@@ -1131,7 +1100,12 @@ def prepare_measurements(
             ]
             indicator_calibration.update(
                 {
-                    "confirmed": True,
+                    "confirmed": all(
+                        row.get("assignment_status") == "confirmed"
+                        and row.get("verification_status")
+                        == "valid_at_experiment"
+                        for row in effective_passports
+                    ),
                     "mode": next(iter(modes)) if len(modes) == 1 else "per_channel",
                     "unit": "mm",
                     "scale_to_mm": 1.0,
@@ -1140,13 +1114,15 @@ def prepare_measurements(
                     "resolution_mm": max(effective_resolutions, default=np.nan),
                     "instrument_ids": list(
                         dict.fromkeys(
-                            str(row.get("instrument_id") or row.get("serial_number"))
+                            str(row.get("instrument_id"))
                             for row in effective_passports
-                            if row.get("instrument_id") or row.get("serial_number")
+                            if row.get("instrument_id")
                         )
                     ),
                 }
             )
+        else:
+            indicator_calibration["confirmed"] = False
         if "settlement" in part:
             supplied_settlement = (
                 pd.to_numeric(part["settlement"], errors="coerce")
@@ -1236,8 +1212,28 @@ def prepare_measurements(
         indicator_calibration_confirmed_parts.append(
             pd.Series(bool(indicator_calibration["confirmed"]), index=part.index)
         )
+        aggregation_for_test = {
+            int(row["row_index"]): row
+            for row in indicator_processing.aggregation_rows
+            if str(row.get("test_id")) == str(test_id)
+        }
         reference_channel_used_parts.append(
-            pd.Series(bool(indicator_calibration["reference_used"]), index=part.index)
+            pd.Series(
+                {
+                    int(index): bool(
+                        aggregation_for_test.get(int(index), {}).get(
+                            "reference_correction_mm"
+                        )
+                        is not None
+                        and aggregation_for_test.get(int(index), {}).get(
+                            "aggregation_status"
+                        )
+                        == "ok"
+                    )
+                    for index in part.index
+                },
+                index=part.index,
+            )
         )
         indicator_instrument_parts.append(
             pd.Series(
@@ -1314,6 +1310,30 @@ def prepare_measurements(
             index=result.index,
             dtype="float64",
         )
+    aggregation_by_index = {
+        int(row["row_index"]): row for row in indicator_processing.aggregation_rows
+    }
+    aggregation_columns = (
+        "aggregated_settlement_mm",
+        "aggregation_method",
+        "channels_required",
+        "channels_used",
+        "missing_channels",
+        "aggregation_status",
+        "plane_rank",
+        "plane_residual_rms_mm",
+        "tilt_magnitude_mm_per_mm",
+        "tilt_direction_deg",
+        "tilt_direction_resolved",
+    )
+    for column in aggregation_columns:
+        result[column] = pd.Series(
+            {
+                int(index): aggregation_by_index.get(int(index), {}).get(column)
+                for index in result.index
+            },
+            index=result.index,
+        )
     result["group"] = pd.concat(group_parts).sort_index()
     result["pair_id"] = pd.concat(pair_parts).sort_index()
     suggested = classify_branches(result)
@@ -1335,7 +1355,33 @@ def prepare_measurements(
     result.attrs["indicator_calibration_parameters"] = deepcopy(
         indicator_processing.passport_rows
     )
-    result.attrs["indicator_processing_schema"] = "indicator-processing/1.0"
+    result.attrs["indicator_aggregation_results"] = deepcopy(
+        indicator_processing.aggregation_rows
+    )
+    result.attrs["metrology_evaluations"] = [
+        {
+            "test_id": row.get("test_id"),
+            "channel": row.get("channel"),
+            "instrument_id": row.get("instrument_id"),
+            "verification_date": row.get("verification_date"),
+            "verification_valid_until": row.get(
+                "verification_valid_until"
+            ),
+            "assignment_status": row.get("assignment_status"),
+            "verification_status": row.get("verification_status"),
+            "verification_evaluation_date": row.get(
+                "verification_evaluation_date"
+            ),
+            "verification_evaluation_date_source": row.get(
+                "verification_evaluation_date_source"
+            ),
+            "verification_evaluation_rule": row.get(
+                "verification_evaluation_rule"
+            ),
+        }
+        for row in indicator_processing.passport_rows
+    ]
+    result.attrs["indicator_processing_schema"] = INDICATOR_PROCESSING_SCHEMA
     return result, issues
 
 
