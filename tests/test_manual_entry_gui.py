@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import pandas as pd
+from pandas.testing import assert_frame_equal
 from streamlit.testing.v1 import AppTest
 
-from soilstamp.gui_manual_entry import MANUAL_SERVICE_KEY
+from soilstamp.gui_manual_entry import (
+    MANUAL_SERVICE_KEY,
+    _localized_manual_issue_frame,
+)
+from soilstamp.manual_entry_validation import validate_manual_draft
+from soilstamp.schema import ValidationIssue
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +38,40 @@ def _button(app: AppTest, label: str):
     return next(item for item in app.button if item.label == label)
 
 
+def test_manual_issue_display_localizes_prose_without_mutating_canonical_issue() -> None:
+    issue = ValidationIssue(
+        "warning",
+        "manual_machine_code",
+        (
+            "В строке measurement поле metadata.load_factor и sequence_no "
+            "используют default."
+        ),
+        column="sequence_no",
+        raw_value="metadata.load_factor=default; measurement; sequence_no",
+        suggested_action="Исправьте indicator_1_raw в metadata JSON.",
+    )
+    canonical = pd.DataFrame([issue.to_dict()])
+    snapshot = canonical.copy(deep=True)
+
+    displayed = _localized_manual_issue_frame(canonical)
+
+    assert_frame_equal(canonical, snapshot)
+    assert issue.code == "manual_machine_code"
+    assert "metadata.load_factor" in issue.message
+    assert "measurement" in issue.message
+    assert displayed.loc[0, "Код"] == "manual_machine_code"
+    assert displayed.loc[0, "Столбец"] == "№ по порядку"
+    assert "измерение" in displayed.loc[0, "Сообщение"]
+    assert "Коэффициент пересчёта нагрузки" in displayed.loc[0, "Сообщение"]
+    assert "№ по порядку" in displayed.loc[0, "Сообщение"]
+    assert "значение по умолчанию" in displayed.loc[0, "Сообщение"]
+    assert "Показание индикатора 1" in displayed.loc[0, "Рекомендуемое действие"]
+    assert "JSON паспорта и служебных параметров" in displayed.loc[
+        0, "Рекомендуемое действие"
+    ]
+    assert displayed.loc[0, "Исходное значение"] == issue.raw_value
+
+
 def test_manual_source_opens_without_excel_and_renders_four_zones() -> None:
     app = _open_manual_entry()
 
@@ -45,6 +87,63 @@ def test_manual_source_opens_without_excel_and_renders_four_zones() -> None:
     assert "ID пары / блока (необязательно)" in labels
 
 
+    issue_table = next(
+        table.value
+        for table in app.dataframe
+        if hasattr(table.value, "columns")
+        and {"Код", "Сообщение", "Столбец", "Рекомендуемое действие"}.issubset(
+            table.value.columns
+        )
+    )
+    visible_issue_prose = " ".join(
+        issue_table[["Сообщение", "Столбец", "Рекомендуемое действие"]]
+        .astype(str)
+        .to_numpy()
+        .ravel()
+    )
+    forbidden_visible_tokens = {
+        "measurement",
+        "metadata",
+        "default",
+        "project_name",
+        "series_name",
+        "laboratory_or_site",
+        "group_name",
+        "soil_type",
+        "soil_batch",
+        "test_name",
+        "archive_number",
+        "stamp_diameter_mm",
+        "stamp_area_m2",
+        "load_factor",
+        "load_zero",
+        "lever_ratio",
+        "number_of_indicators",
+        "settlement_aggregation",
+        "indicator_resolution_mm",
+        "division_mm",
+        "load_raw",
+        "indicator_1_raw",
+        "sequence_no",
+    }
+    assert not {
+        token
+        for token in forbidden_visible_tokens
+        if re.search(
+            rf"(?<![\w-]){re.escape(token)}(?![\w-])",
+            visible_issue_prose,
+            flags=re.IGNORECASE,
+        )
+    }
+    assert "значение по умолчанию" in visible_issue_prose
+    assert "missing_manual_measurement" in set(issue_table["Код"])
+
+    canonical_validation = validate_manual_draft(
+        app.session_state[MANUAL_SERVICE_KEY].draft
+    )
+    assert any("measurement" in issue.message for issue in canonical_validation.issues)
+
+
 def test_invalid_manual_draft_can_be_downloaded_but_not_activated() -> None:
     app = _open_manual_entry()
 
@@ -53,7 +152,7 @@ def test_invalid_manual_draft_can_be_downloaded_but_not_activated() -> None:
         for item in app.download_button
         if item.label == "Сохранить черновик JSON"
     )
-    activate = _button(app, "Передать snapshot в анализ")
+    activate = _button(app, "Передать снимок в анализ")
 
     assert download.disabled is False
     assert activate.disabled is True
@@ -110,7 +209,7 @@ def test_valid_manual_demo_can_be_activated_in_common_pipeline() -> None:
     app.run(timeout=120)
     assert not app.exception
 
-    activate = _button(app, "Передать snapshot в анализ")
+    activate = _button(app, "Передать снимок в анализ")
     assert activate.disabled is False
     activate.click()
     app.run(timeout=120)
@@ -120,7 +219,7 @@ def test_valid_manual_demo_can_be_activated_in_common_pipeline() -> None:
 
     assert not app.exception
     assert [tab.label for tab in app.tabs] == [
-        "Импорт и QC",
+        "Импорт и контроль качества",
         "Коррекции",
         "Графики",
         "pcr и E",

@@ -8,6 +8,7 @@ existing calculation pipeline.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +42,8 @@ from .manual_entry_validation import (
 )
 from .plotting import plot_curves
 from .schema import ValidationIssue
+from .ui import display_dataframe, display_mapping, label_for_enum
+from .ui.column_labels_ru import COMMON_COLUMN_LABELS_RU
 
 
 MANUAL_SERVICE_KEY = "manual_entry_service"
@@ -74,11 +77,128 @@ def _ui_safe_frame(frame: pd.DataFrame) -> pd.DataFrame:
             pass
         return str(value)
 
-    for column in result.columns:
-        if pd.api.types.is_object_dtype(result[column].dtype):
-            result[column] = result[column].map(text_value)
+    # Localized display labels are not required to be unique.  Work by
+    # position so a duplicate Russian heading never turns result[column] into
+    # a DataFrame and never affects the canonical source frame.
+    for position in range(result.shape[1]):
+        series = result.iloc[:, position]
+        if pd.api.types.is_object_dtype(series.dtype):
+            result.isetitem(position, series.map(text_value))
     result.attrs.clear()
     return result
+
+
+def _localized_frame(frame: pd.DataFrame, table_kind: str) -> pd.DataFrame:
+    """Return an Arrow-safe Russian UI copy without changing canonical data."""
+
+    return _ui_safe_frame(display_dataframe(frame, table_kind))
+
+
+_MANUAL_ISSUE_FIELD_LABELS: dict[str, str] = {
+    key: value
+    for key, value in COMMON_COLUMN_LABELS_RU.items()
+    if len(key) > 2
+}
+_MANUAL_ISSUE_FIELD_LABELS.update(
+    {
+        "archive_number": "Архивный номер",
+        "bar_diameter_or_aperture_mm": "Диаметр стержня или размер ячейки, мм",
+        "group_name": "Наименование группы",
+        "indicator_passports": "Паспорта индикаторов",
+        "indicator_raw": "Показание индикатора",
+        "metrology_status": "Статус метрологии",
+        "number_of_indicators": "Количество индикаторов",
+        "project_name": "Наименование проекта",
+        "test_name": "Наименование испытания",
+    }
+)
+_MANUAL_ISSUE_FIELD_LABELS.update(
+    {column: label_for_enum("editor_column", column) for column in MANUAL_EDITOR_COLUMNS}
+)
+
+_MANUAL_ISSUE_PROSE_TOKENS: tuple[tuple[str, str], ...] = (
+    ("metadata JSON", "JSON паспорта и служебных параметров"),
+    ("indicator_*", "показания индикаторов"),
+    ("measurement", "измерение"),
+    ("failure", "разрушение"),
+    ("unloading", "разгрузка"),
+    ("settlement", "осадка"),
+    ("default", "значение по умолчанию"),
+    ("metadata", "паспорт и служебные параметры"),
+    ("raw", "исходные данные"),
+)
+
+
+def _localize_manual_issue_prose(value: Any) -> Any:
+    """Localize app-controlled issue prose without changing the issue itself."""
+
+    if not isinstance(value, str):
+        return value
+    rendered = value
+
+    # Prefer a readable phrase for the common ``metadata.field`` notation.
+    for machine_name, russian_label in sorted(
+        _MANUAL_ISSUE_FIELD_LABELS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        rendered = re.sub(
+            rf"(?<![\w-])metadata\.{re.escape(machine_name)}(?![\w-])",
+            f"параметр «{russian_label}»",
+            rendered,
+            flags=re.IGNORECASE,
+        )
+
+    for machine_name, russian_label in sorted(
+        _MANUAL_ISSUE_FIELD_LABELS.items(), key=lambda item: len(item[0]), reverse=True
+    ):
+        rendered = re.sub(
+            rf"(?<![\w-]){re.escape(machine_name)}(?![\w-])",
+            f"«{russian_label}»",
+            rendered,
+            flags=re.IGNORECASE,
+        )
+
+    for machine_token, russian_text in _MANUAL_ISSUE_PROSE_TOKENS:
+        rendered = re.sub(
+            rf"(?<![\w-]){re.escape(machine_token)}(?![\w-])",
+            russian_text,
+            rendered,
+            flags=re.IGNORECASE,
+        )
+    return rendered
+
+
+def _manual_issue_field_label(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    parts = re.split(r"([/.])", value)
+    return "".join(
+        _MANUAL_ISSUE_FIELD_LABELS.get(part, label_for_enum("editor_column", part))
+        if part not in {"/", "."}
+        else " / " if part == "/" else " · "
+        for part in parts
+    )
+
+
+def _localized_manual_issue_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return a UI-only localized issue table and preserve canonical evidence."""
+
+    display_source = frame.copy(deep=True)
+    for column in ("message", "suggested_action"):
+        if column in display_source:
+            display_source[column] = display_source[column].map(
+                _localize_manual_issue_prose
+            )
+    if "column" in display_source:
+        display_source["column"] = display_source["column"].map(
+            _manual_issue_field_label
+        )
+    return _localized_frame(display_source, "issues")
+
+
+def _enum_formatter(domain: str):
+    """Build a display-only Streamlit formatter for a canonical enum domain."""
+
+    return lambda value: label_for_enum(domain, value)
 
 
 def get_manual_service(*, author: str = "local-user") -> ManualEntryService:
@@ -175,6 +295,7 @@ def _indicator_passport_widgets(
         mode_options,
         index=mode_index,
         key=f"{widget_prefix}_mode",
+        format_func=_enum_formatter("indicator_mode"),
     )
     range_mm = c1.text_input(
         "Диапазон, мм *", value=current.range_mm or "", key=f"{widget_prefix}_range"
@@ -194,6 +315,7 @@ def _indicator_passport_widgets(
         sign_options,
         index=sign_index,
         key=f"{widget_prefix}_sign",
+        format_func=_enum_formatter("cumulative_sign"),
     )
     initial_reading = c1.text_input(
         "Начальное показание",
@@ -249,6 +371,7 @@ def _indicator_passport_widgets(
         assignment_options,
         index=assignment_index,
         key=f"{widget_prefix}_assignment",
+        format_func=_enum_formatter("status"),
     )
     return {
         "type": indicator_type,
@@ -311,17 +434,23 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         test_date = c2.text_input(
             "Дата YYYY-MM-DD (необязательно)",
             value=passport.test_date,
-            help="Без даты опыта статус поверки будет review_required.",
+            help="Без даты опыта статус поверки будет «Требуется проверка».",
         )
         operator = c3.text_input("Оператор *", value=passport.operator)
         laboratory_or_site = c1.text_input(
             "Лаборатория / площадка *", value=passport.laboratory_or_site
         )
         test_scope = c2.selectbox(
-            "Область *", scope_options, index=scope_index
+            "Область *",
+            scope_options,
+            index=scope_index,
+            format_func=_enum_formatter("test_scope"),
         )
         protocol_type = c3.selectbox(
-            "Тип протокола *", protocol_options, index=protocol_index
+            "Тип протокола *",
+            protocol_options,
+            index=protocol_index,
+            format_func=_enum_formatter("protocol_type"),
         )
         group_name = c1.text_input("Группа опыта *", value=passport.group_name)
         baseline_group = c2.text_input(
@@ -353,16 +482,22 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         st.markdown("##### Штамп и нагрузка")
         c1, c2, c3, c4 = st.columns(4)
         stamp_shape = c1.selectbox(
-            "Форма штампа *", shape_options, index=shape_index
+            "Форма штампа *",
+            shape_options,
+            index=shape_index,
+            format_func=_enum_formatter("stamp_shape"),
         )
         stamp_diameter = c2.text_input(
             "Диаметр/размер, мм *", value=passport.stamp_diameter_mm or ""
         )
         stamp_area = c3.text_input(
-            "Площадь, м² (custom)", value=passport.stamp_area_m2 or ""
+            "Площадь, м² (для другой формы)", value=passport.stamp_area_m2 or ""
         )
         load_kind = c4.selectbox(
-            "Тип нагрузки *", load_kinds, index=load_kind_index
+            "Тип нагрузки *",
+            load_kinds,
+            index=load_kind_index,
+            format_func=_enum_formatter("load_kind"),
         )
         load_unit = c1.selectbox(
             "Единица нагрузки *", load_units, index=load_unit_index
@@ -385,14 +520,17 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         reference_enabled = c2.checkbox(
             "Опорный индикатор",
             value=passport.indicator_passports.get("reference_indicator") is not None,
-            help="Паспорт reference_indicator хранится отдельно от вертикальных каналов.",
+            help="Паспорт опорного индикатора хранится отдельно от вертикальных каналов.",
         )
         metrology_options, metrology_index = _option_index(
             ["draft", "confirmed", "migration_review_required"],
             passport.metrology_status,
         )
         metrology_status = c3.selectbox(
-            "Статус метрологии *", metrology_options, index=metrology_index
+            "Статус метрологии *",
+            metrology_options,
+            index=metrology_index,
+            format_func=_enum_formatter("metrology"),
         )
         aggregation_options, aggregation_index = _option_index(
             [
@@ -408,6 +546,7 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
             "Агрегация осадки *",
             aggregation_options,
             index=aggregation_index,
+            format_func=_enum_formatter("aggregation"),
         )
         active_channels = [
             f"indicator_{index}" for index in range(1, number_of_indicators + 1)
@@ -421,9 +560,10 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
             "Фиксированный состав каналов",
             active_channels,
             default=configured_default,
+            format_func=_enum_formatter("channel"),
             help=(
                 "Состав сохраняется до обработки и не меняется по строкам. "
-                "Для all_channels_mean выберите все активные каналы."
+                "Для среднего по всем каналам выберите все активные каналы."
             ),
         )
         primary_options = ["", *active_channels]
@@ -436,18 +576,22 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
             "Основной канал",
             primary_options,
             index=primary_options.index(primary_default),
+            format_func=_enum_formatter("channel"),
         )
         missing_options, missing_index = _option_index(
             ["block", "allow_if_solvable"],
             passport.settlement_missing_channel_policy,
         )
         missing_policy = c2.selectbox(
-            "Пропуск канала *", missing_options, index=missing_index
+            "Пропуск канала *",
+            missing_options,
+            index=missing_index,
+            format_func=_enum_formatter("missing_policy"),
         )
         metrology_reason = c3.text_input(
             "Причина подтверждения метрологии",
             value="",
-            help="Обязательна при смене статуса на confirmed.",
+            help="Обязательна при смене статуса на «Подтверждено».",
         )
         st.caption(
             "Общего сохраняемого шаблона нет: каждый блок ниже является отдельным "
@@ -455,7 +599,8 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         )
         for channel in active_channels:
             with st.expander(
-                f"Паспорт {channel}", expanded=channel == "indicator_1"
+                f"Паспорт: {label_for_enum('channel', channel)}",
+                expanded=channel == "indicator_1",
             ):
                 indicator_payload[channel] = _indicator_passport_widgets(
                     channel,
@@ -463,7 +608,7 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                     key_prefix=f"{key_prefix}_{service.draft.draft_id}",
                 )
         if reference_enabled:
-            with st.expander("Паспорт reference_indicator", expanded=False):
+            with st.expander("Паспорт: опорный индикатор", expanded=False):
                 indicator_payload["reference_indicator"] = (
                     _indicator_passport_widgets(
                         "reference_indicator",
@@ -474,12 +619,14 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         else:
             indicator_payload["reference_indicator"] = None
         if passport.legacy_common_indicator_passport is not None:
-            with st.expander("Legacy-общий паспорт (только чтение)"):
+            with st.expander("Общий паспорт старого формата (только чтение)"):
                 st.warning(
                     "Эти значения не участвуют в расчёте. Заполните первый "
                     "поканальный паспорт вручную, затем используйте явное копирование."
                 )
-                st.json(passport.legacy_common_indicator_passport.to_dict())
+                st.json(
+                    display_mapping(passport.legacy_common_indicator_passport.to_dict())
+                )
 
         reinforcement_changes: dict[str, Any] = {}
         if is_reinforced:
@@ -538,7 +685,7 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                 custom_text or "{}", parse_constant=reject_json_constant
             )
             if not isinstance(custom_parameters, dict):
-                raise ValueError("custom_parameters должен быть JSON-объектом.")
+                raise ValueError("Дополнительные параметры должны быть JSON-объектом.")
             previous_indicator_payload = {
                 channel: values.to_dict() if values is not None else None
                 for channel, values in passport.indicator_passports.items()
@@ -626,6 +773,7 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                 "Исходный канал",
                 assigned_channels,
                 key=f"{key_prefix}_passport_copy_source",
+                format_func=_enum_formatter("channel"),
             )
             copy_targets = st.multiselect(
                 "Целевые каналы",
@@ -641,11 +789,12 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                     if channel != copy_source
                 ],
                 key=f"{key_prefix}_passport_copy_targets",
+                format_func=_enum_formatter("channel"),
             )
             copy_reason = st.text_input(
                 "Причина копирования *",
                 key=f"{key_prefix}_passport_copy_reason",
-                help="Команда и причина сохраняются в audit trail для каждого канала.",
+                help="Команда и причина сохраняются в журнале для каждого канала.",
             )
             if st.button(
                 "Копировать паспорт в каналы",
@@ -685,8 +834,9 @@ def _run_action(action, *, success: str) -> None:
 def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -> None:
     st.subheader("2. Таблица первичных отсчётов")
     st.caption(
-        "Raw-значения хранятся как текст. Поддерживаются Tab/Enter/стрелки и "
-        "обычная вставка из Excel; sequence_no рассчитывается по видимому порядку."
+        "Исходные значения хранятся как текст. Поддерживаются клавиши Tab, Enter, "
+        "стрелки и обычная вставка из Excel; порядковый номер рассчитывается "
+        "по видимому расположению строк."
     )
     n_indicators = service.draft.passport.number_of_indicators or 1
     frame = service.editor_frame(n_indicators=n_indicators)
@@ -696,22 +846,40 @@ def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -
     editor_key = f"{key_prefix}_editor_{st.session_state.get(MANUAL_EDITOR_GENERATION_KEY, 0)}"
     column_config: dict[str, Any] = {
         EDITOR_UUID_COLUMN: None,
-        "sequence_no": st.column_config.NumberColumn("seq", disabled=True),
-        "stage_no": st.column_config.TextColumn("stage"),
+        "sequence_no": st.column_config.NumberColumn(
+            label_for_enum("editor_column", "sequence_no"), disabled=True
+        ),
+        "stage_no": st.column_config.TextColumn(
+            label_for_enum("editor_column", "stage_no")
+        ),
         "branch": st.column_config.SelectboxColumn(
-            "branch", options=list(MANUAL_BRANCHES), required=True
+            label_for_enum("editor_column", "branch"),
+            options=list(MANUAL_BRANCHES),
+            required=True,
+            format_func=_enum_formatter("branch"),
         ),
-        "elapsed_time_s": st.column_config.TextColumn("time, s"),
-        "timestamp": st.column_config.TextColumn("timestamp"),
-        "load_raw": st.column_config.TextColumn("load raw"),
+        "elapsed_time_s": st.column_config.TextColumn(
+            label_for_enum("editor_column", "elapsed_time_s")
+        ),
+        "timestamp": st.column_config.TextColumn(
+            label_for_enum("editor_column", "timestamp")
+        ),
+        "load_raw": st.column_config.TextColumn(
+            label_for_enum("editor_column", "load_raw")
+        ),
         "row_status": st.column_config.SelectboxColumn(
-            "status", options=list(MANUAL_ROW_STATUSES), required=True
+            label_for_enum("editor_column", "row_status"),
+            options=list(MANUAL_ROW_STATUSES),
+            required=True,
+            format_func=_enum_formatter("row_status"),
         ),
-        "comment": st.column_config.TextColumn("comment"),
+        "comment": st.column_config.TextColumn(
+            label_for_enum("editor_column", "comment")
+        ),
     }
     for index in range(1, 5):
         column_config[f"indicator_{index}_raw"] = st.column_config.TextColumn(
-            f"indicator {index} raw"
+            label_for_enum("editor_column", f"indicator_{index}_raw")
         )
     edited = st.data_editor(
         frame,
@@ -740,7 +908,7 @@ def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -
     )
     selected = int(
         st.number_input(
-            "Активная строка (1-based)",
+            "Активная строка (нумерация с 1)",
             min_value=1,
             max_value=max(1, row_count),
             value=selected_default,
@@ -803,6 +971,10 @@ def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -
             "TSV из Excel",
             key=f"{key_prefix}_paste_text",
             placeholder="0\tloading\t0\t0,00\t9,80",
+            help=(
+                "Во вставляемом TSV поле ветви использует служебный код; "
+                "например, loading означает нагружение."
+            ),
         )
         c1, c2 = st.columns(2)
         paste_row_key = f"{key_prefix}_paste_row"
@@ -826,6 +998,7 @@ def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -
             "Начальный столбец",
             list(MANUAL_EDITOR_COLUMNS[1:]),
             key=f"{key_prefix}_paste_column",
+            format_func=_enum_formatter("editor_column"),
         )
         if st.button("Вставить TSV", key=f"{key_prefix}_paste"):
             _run_action(
@@ -877,6 +1050,7 @@ def _table_editor(service: ManualEntryService, actor: str, *, key_prefix: str) -
             list(MANUAL_EDITOR_COLUMNS[1:]),
             default=["stage_no", "branch", "elapsed_time_s", "load_raw"],
             key=f"{key_prefix}_range_columns",
+            format_func=_enum_formatter("editor_column"),
         )
         c1, c2 = st.columns(2)
         if c1.button("Очистить диапазон", key=f"{key_prefix}_clear"):
@@ -927,7 +1101,7 @@ def _validation_panel(
     c3.metric("Анализ", "доступен" if validation.can_analyze else "заблокирован")
     if validation.issues:
         frame = validation.to_frame()
-        st.dataframe(_ui_safe_frame(frame), hide_index=True, width="stretch")
+        st.dataframe(_localized_manual_issue_frame(frame), hide_index=True, width="stretch")
         targets = [
             (index, issue)
             for index, issue in enumerate(validation.issues)
@@ -935,7 +1109,11 @@ def _validation_panel(
         ]
         if targets:
             labels = [
-                f"{issue.code}: строка {int(issue.rows[0]) + 1}, {issue.column or 'строка'}"
+                (
+                    f"Строка {int(issue.rows[0]) + 1}, "
+                    f"{_manual_issue_field_label(issue.column) if issue.column else 'строка'}: "
+                    f"{_localize_manual_issue_prose(issue.message)} ({issue.code})"
+                )
                 for _, issue in targets
             ]
             selected = st.selectbox(
@@ -973,8 +1151,11 @@ def _validation_panel(
                     styles.loc[row, :] = "background-color: #ffd6d6"
 
         st.caption("Подсветка ячеек и строк с критическими ошибками")
+        displayed_editor = _localized_frame(editor, "manual_editor")
+        displayed_styles = styles.copy()
+        displayed_styles.columns = displayed_editor.columns
         st.dataframe(
-            editor.style.apply(lambda _: styles, axis=None),
+            displayed_editor.style.apply(lambda _: displayed_styles, axis=None),
             hide_index=True,
             width="stretch",
         )
@@ -989,21 +1170,23 @@ def _preview(
     st.subheader("4. Предварительный расчёт")
     st.caption(
         "Предварительный просмотр не является утверждённым отчётным графиком. "
-        "Расчёт выполняется тем же pipeline, что и Excel."
+        "Расчёт выполняется тем же расчётным конвейером, что и импорт из Excel."
     )
     if not validation.can_analyze:
         st.warning("Исправьте критические ошибки. Черновик при этом можно скачать.")
         return computed
     if computed is None:
-        st.error("Предварительный pipeline не сформировал проверяемый результат.")
+        st.error("Предварительный расчётный конвейер не сформировал проверяемый результат.")
         return None
     prepared = computed.prepared
     pipeline_issues = computed.issues
     blockers = [issue for issue in pipeline_issues if bool(issue.blocks_processing)]
     if blockers:
-        st.error("Pipeline обнаружил блокирующие ошибки.")
+        st.error("Расчётный конвейер обнаружил блокирующие ошибки.")
         st.dataframe(
-            _ui_safe_frame(pd.DataFrame([issue.to_dict() for issue in pipeline_issues])),
+            _localized_manual_issue_frame(
+                pd.DataFrame([issue.to_dict() for issue in pipeline_issues])
+            ),
             hide_index=True,
             width="stretch",
         )
@@ -1041,7 +1224,7 @@ def _preview(
         if column in prepared
     ]
     st.dataframe(
-        _ui_safe_frame(prepared[[*raw_columns, *calculated]]),
+        _localized_frame(prepared[[*raw_columns, *calculated]], "protocol"),
         hide_index=True,
         width="stretch",
     )
@@ -1063,10 +1246,11 @@ def _preview(
             "conversion_method",
         ]
         st.dataframe(
-            _ui_safe_frame(
+            _localized_frame(
                 conversion[
                     [column for column in conversion_columns if column in conversion]
-                ]
+                ],
+                "indicator_processing_audit",
             ),
             hide_index=True,
             width="stretch",
@@ -1075,24 +1259,36 @@ def _preview(
     if not events.empty:
         with st.expander("Переходы шкалы, обратный ход и коррекции"):
             st.dataframe(
-                _ui_safe_frame(events), hide_index=True, width="stretch"
+                _localized_frame(events, "indicator_events"),
+                hide_index=True,
+                width="stretch",
             )
     nonblocking = [
         issue for issue in pipeline_issues if not bool(issue.blocks_processing)
     ]
     if nonblocking:
-        st.caption("Предупреждения общего pipeline")
+        st.caption("Предупреждения общего расчётного конвейера")
         st.dataframe(
-            _ui_safe_frame(pd.DataFrame(issue.to_dict() for issue in nonblocking)),
+            _localized_manual_issue_frame(
+                pd.DataFrame(issue.to_dict() for issue in nonblocking)
+            ),
             hide_index=True,
             width="stretch",
         )
     area = pd.to_numeric(prepared.get("stamp_area_m2"), errors="coerce").dropna()
     st.metric("Площадь штампа, м²", f"{float(area.iloc[0]):.6g}" if len(area) else "—")
     failures = failure_summary(prepared)
-    st.dataframe(failures, hide_index=True, width="stretch")
+    st.dataframe(
+        _localized_frame(failures, "failure_summary"),
+        hide_index=True,
+        width="stretch",
+    )
     try:
-        axis_mode = "p-s" if pd.to_numeric(prepared["p_kPa"], errors="coerce").notna().any() else "F-s"
+        axis_mode = (
+            "p-s"
+            if pd.to_numeric(prepared["p_kPa"], errors="coerce").notna().any()
+            else "F-s"
+        )
         output = plot_curves(prepared, mode="raw_protocol", axis_mode=axis_mode)
         st.pyplot(output.figure, width="stretch")
         plt.close(output.figure)
@@ -1114,11 +1310,13 @@ def _draft_controls(
     active_hash = st.session_state.get(MANUAL_ACTIVE_HASH_KEY)
     if active_hash and active_hash != service.draft.sha256:
         st.warning(
-            "Активный расчёт относится к предыдущему snapshot. Текущие правки ещё не переданы в анализ."
+            "Активный расчёт относится к предыдущему снимку. "
+            "Текущие правки ещё не переданы в анализ."
         )
     st.caption(
-        f"schema={service.draft.schema_version}; draft SHA-256={service.draft.sha256[:16]}…; "
-        f"audit events={len(service.draft.audit_events)}"
+        f"схема={service.draft.schema_version}; "
+        f"SHA-256 черновика={service.draft.sha256[:16]}…; "
+        f"событий журнала={len(service.draft.audit_events)}"
     )
     c1, c2 = st.columns(2)
     c1.download_button(
@@ -1146,11 +1344,11 @@ def _draft_controls(
             else:
                 st.session_state[MANUAL_SERVICE_KEY] = replacement
                 _bump_editor()
-                st.success("Черновик открыт без нормализации raw-значений.")
+                st.success("Черновик открыт без нормализации исходных значений.")
                 st.rerun()
 
     if st.button(
-        "Передать snapshot в анализ",
+        "Передать снимок в анализ",
         type="primary",
         disabled=not validation.can_analyze,
         key=f"{key_prefix}_activate",
@@ -1172,25 +1370,29 @@ def _draft_controls(
         # state change until the top of the next run to satisfy Streamlit's
         # widget-state contract.
         st.session_state[MANUAL_SOURCE_REQUEST_KEY] = True
-        st.success("Snapshot заморожен и будет передан в общий pipeline.")
+        st.success("Снимок зафиксирован и будет передан в общий расчётный конвейер.")
         st.rerun()
 
-    with st.expander("Audit trail ручного черновика"):
+    with st.expander("Журнал изменений ручного черновика"):
         st.dataframe(
-            _ui_safe_frame(
-                pd.DataFrame([event.to_dict() for event in service.draft.audit_events])
+            _localized_frame(
+                pd.DataFrame([event.to_dict() for event in service.draft.audit_events]),
+                "audit",
             ),
             hide_index=True,
             width="stretch",
         )
-    st.info("Сохранение в SQLite-архив появится только в TASK 13; сейчас доступен JSON-черновик.")
+    st.info(
+        "Сохранение в архив SQLite предусмотрено отдельной задачей 13; "
+        "сейчас доступен черновик JSON."
+    )
 
 
 def render_manual_entry(*, key_prefix: str = "manual_entry") -> None:
     """Render all four TASK 12 zones without activating data implicitly."""
 
     st.header("Ввод вручную")
-    st.caption("Источник первичных данных: manual · активное состояние: черновик")
+    st.caption("Источник первичных данных: ручной ввод · активное состояние: черновик")
     actor = st.text_input(
         "Автор изменений *",
         value="local-user",
@@ -1222,7 +1424,7 @@ def render_manual_entry(*, key_prefix: str = "manual_entry") -> None:
         runtime_issue = ValidationIssue(
             "error",
             "manual_preview_exception",
-            f"Предварительный pipeline завершился ошибкой: {exc}",
+            f"Предварительный расчётный конвейер завершился ошибкой: {exc}",
             raw_value=str(exc),
             suggested_action="Проверьте паспорт и исходные строки; черновик можно сохранить.",
         )

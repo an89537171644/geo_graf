@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -84,6 +85,7 @@ from soilstamp.report_package import (
 )
 from soilstamp.reporting import build_markdown_report, reproducibility_bundle
 from soilstamp.schema import VERSION, ValidationIssue
+from soilstamp.ui import display_dataframe, display_mapping, display_text, label_for_enum
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -127,14 +129,27 @@ def _display_safe_frame(frame: pd.DataFrame) -> pd.DataFrame:
             pass
         return str(value)
 
-    for column in result.columns:
-        dtype = result[column].dtype
+    for position in range(result.shape[1]):
+        series = result.iloc[:, position]
+        dtype = series.dtype
         if pd.api.types.is_object_dtype(dtype) or pd.api.types.is_string_dtype(dtype):
-            result[column] = result[column].map(text_value)
+            result.isetitem(position, series.map(text_value))
     # Processing artefacts live in attrs and are exported separately.  Passing
     # them through every Arrow preview is both redundant and expensive.
     result.attrs.clear()
     return result
+
+
+def _localized_frame(frame: pd.DataFrame, table_kind: str) -> pd.DataFrame:
+    """Return an Arrow-safe Russian UI copy; canonical frames remain untouched."""
+
+    return _display_safe_frame(display_dataframe(frame, table_kind))
+
+
+def _enum_formatter(domain: str):
+    """Build a Streamlit format_func that preserves the underlying machine value."""
+
+    return lambda value: label_for_enum(domain, value)
 
 
 def _scope_indicator_table(table: pd.DataFrame, test_ids: list[str]) -> pd.DataFrame:
@@ -231,7 +246,7 @@ def _publication_selection_controls(
 
     st.markdown("##### Явный выбор кривой для повторных серий")
     st.caption(
-        "Публикационный режим не выбирает первый test ID. "
+        "Публикационный режим не выбирает первое испытание автоматически. "
         "Подтвердите способ для каждой серии; ручной представитель требует автора, UTC-времени и причины."
     )
     candidates: list[dict] = []
@@ -251,6 +266,7 @@ def _publication_selection_controls(
             method_options,
             index=index,
             key=f"curve_method_{context_key}_{group}",
+            format_func=_enum_formatter("curve"),
         )
         if method == "— выбрать —":
             continue
@@ -355,6 +371,173 @@ def _issue_frame(issues) -> pd.DataFrame:
     return pd.DataFrame([item.to_dict() if hasattr(item, "to_dict") else item for item in issues])
 
 
+_PROCESSING_EXCEPTION_ACTION_CANONICAL = (
+    "Скачайте диагностический ZIP и проверьте metadata/калибровку."
+)
+_PROCESSING_EXCEPTION_ACTION_RU = (
+    "Скачайте диагностический ZIP и проверьте паспорт, служебные параметры "
+    "и калибровку."
+)
+_PASSPORT_FIELD_LABELS_RU = {
+    "stamp_geometry": "Геометрия штампа",
+    "reinforcement_scheme": "Схема армирования",
+    "instruments_and_calibration": "Приборы и поверка",
+}
+_QC_FIELD_LABELS_RU = {
+    "settlement": "Осадка",
+    "indicator_1": "Индикатор 1",
+    "indicator_2": "Индикатор 2",
+    "indicator_3": "Индикатор 3",
+    "indicator_4": "Индикатор 4",
+    "indicator_passports": "Паспорта индикаторов",
+    "metrology_status": "Статус метрологии",
+}
+_QC_TEXT_REPLACEMENTS_RU = (
+    ("calibration factor/sign", "коэффициент/знак калибровки"),
+    ("indicator_calibration_factor", "коэффициент калибровки индикатора"),
+    ("settlement_missing_channel_policy", "политика обработки пропущенных каналов"),
+    ("settlement_aggregation_channels", "каналы агрегации осадки"),
+    ("settlement_primary_channel", "основной канал осадки"),
+    ("settlement_aggregation", "агрегация осадки"),
+    ("migration_review_required", "требуется проверка после переноса данных"),
+    ("cumulative_settlement", "готовая накопленная осадка"),
+    ("direct_displacement", "готовое перемещение"),
+    ("indicator_1..4", "индикаторы 1–4"),
+    ("reference_indicator", "опорный индикатор"),
+    ("indicator_mode", "режим индикатора"),
+    ("indicator_unit", "единица показаний индикатора"),
+    ("instrument_id", "идентификатор прибора"),
+    ("indicator_*", "индикаторные каналы"),
+    ("indicator_1", "индикатор 1"),
+    ("indicator_2", "индикатор 2"),
+    ("indicator_3", "индикатор 3"),
+    ("indicator_4", "индикатор 4"),
+    ("calibration factor", "коэффициент калибровки"),
+    ("metadata.", "паспорт и служебные параметры: "),
+    ("settlement", "осадка"),
+    ("resolution", "разрешение"),
+    ("auxiliary", "вспомогательные"),
+    ("Legacy", "Старый формат"),
+    ("raw", "исходные данные"),
+    ("mode", "режим"),
+    ("unit", "единица"),
+)
+
+
+def _passport_field_label(name: str) -> str:
+    localized = next(iter(display_mapping({name: None})))
+    return _PASSPORT_FIELD_LABELS_RU.get(name, str(localized))
+
+
+def _passport_fields_frame(passport: dict) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    missing = set(passport["missing"])
+    for name, value in passport["fields"].items():
+        display_entry = display_mapping({name: value})
+        _, display_value = next(iter(display_entry.items()))
+        rows.append(
+            {
+                "field": _passport_field_label(name),
+                "value": (
+                    json.dumps(display_value, ensure_ascii=False, default=str)
+                    if isinstance(display_value, (dict, list, tuple))
+                    else "" if display_value is None else str(display_value)
+                ),
+                "filled": name not in missing,
+            }
+        )
+    return _localized_frame(pd.DataFrame(rows), "passport_fields")
+
+
+def _localized_qc_text(value):
+    if not isinstance(value, str):
+        return value
+    rendered = value
+    for machine_text, russian_text in _QC_TEXT_REPLACEMENTS_RU:
+        if machine_text.endswith("."):
+            rendered = rendered.replace(machine_text, russian_text)
+        else:
+            rendered = re.sub(
+                rf"(?<![\w]){re.escape(machine_text)}(?![\w])",
+                russian_text,
+                rendered,
+            )
+    return rendered
+
+
+def _localized_qc_field(value):
+    if not isinstance(value, str):
+        return value
+    if value in _QC_FIELD_LABELS_RU:
+        return _QC_FIELD_LABELS_RU[value]
+    localized = next(iter(display_mapping({value: None})))
+    return str(localized)
+
+
+def _localized_report_preview(report: str) -> str:
+    """Return a display-only report copy with generated machine states localized."""
+
+    preview = display_text(report)
+    exact_replacements = {
+        "Активный слой: `raw`": (
+            f"Активный слой: `{label_for_enum('correction', 'raw')}`"
+        ),
+        "mode=`cumulative_settlement`": (
+            f"режим=`{label_for_enum('indicator_mode', 'cumulative_settlement')}`"
+        ),
+        "назначение=`migration_review_required`": (
+            "назначение="
+            f"`{label_for_enum('metrology', 'migration_review_required')}`"
+        ),
+        "статус=`review_required`": (
+            f"статус=`{label_for_enum('review', 'review_required')}`"
+        ),
+        "review_status=`review_required`": (
+            f"статус проверки=`{label_for_enum('review', 'review_required')}`"
+        ),
+        "status=`review_required`": (
+            f"статус=`{label_for_enum('review', 'review_required')}`"
+        ),
+        "метод=`unresolved`": (
+            f"метод=`{label_for_enum('status', 'unresolved')}`"
+        ),
+        "**warning /": f"**{label_for_enum('status', 'warning')} /",
+    }
+    for machine_text, russian_text in exact_replacements.items():
+        preview = preview.replace(machine_text, russian_text)
+
+    counted_statuses = (
+        "not_applied_direct_settlement",
+        "migration_review_required",
+        "ok",
+        "warning",
+        "missing",
+    )
+    for status in counted_statuses:
+        domain = "metrology" if status == "migration_review_required" else "status"
+        localized = label_for_enum(domain, status)
+        preview = preview.replace(f"статусы={status}=", f"статусы={localized}=")
+        preview = preview.replace(f"QC-статусы: {status}=", f"QC-статусы: {localized}=")
+        preview = preview.replace(f", {status}=", f", {localized}=")
+    return preview
+
+
+def _localized_issue_frame(issue_frame: pd.DataFrame) -> pd.DataFrame:
+    """Localize issue prose on a display-only copy of the canonical frame."""
+
+    display_frame = issue_frame.copy(deep=True)
+    for column in ("message", "suggested_action"):
+        if column in display_frame:
+            display_frame[column] = display_frame[column].map(_localized_qc_text)
+    if "column" in display_frame:
+        display_frame["column"] = display_frame["column"].map(_localized_qc_field)
+    if "suggested_action" in display_frame:
+        display_frame["suggested_action"] = display_frame["suggested_action"].replace(
+            {_PROCESSING_EXCEPTION_ACTION_CANONICAL: _PROCESSING_EXCEPTION_ACTION_RU}
+        )
+    return _localized_frame(display_frame, "issues")
+
+
 def _diagnostic_bundle(input_context: dict, issues) -> bytes:
     """Package exact inputs plus machine-readable diagnostics before processing."""
 
@@ -394,7 +577,7 @@ def _diagnostic_bundle(input_context: dict, issues) -> bytes:
 
 def _render_blocking_diagnostics(input_context: dict, issues, *, key_prefix: str) -> None:
     issue_frame = _issue_frame(issues)
-    st.dataframe(_display_safe_frame(issue_frame), width="stretch", hide_index=True)
+    st.dataframe(_localized_issue_frame(issue_frame), width="stretch", hide_index=True)
     st.download_button(
         "Скачать диагностический пакет ZIP",
         _diagnostic_bundle(input_context, issues),
@@ -403,7 +586,7 @@ def _render_blocking_diagnostics(input_context: dict, issues, *, key_prefix: str
         key=f"{key_prefix}_zip",
     )
     st.download_button(
-        "Скачать issues.csv",
+        "Скачать замечания контроля качества (CSV)",
         issue_frame.to_csv(index=False).encode("utf-8-sig"),
         "issues.csv",
         "text/csv",
@@ -538,9 +721,14 @@ def _load_inputs() -> dict:
     protocol_file = st.sidebar.file_uploader(
         "Протокол CSV/XLSX", type=["csv", "txt", "xlsx", "xlsm"]
     )
-    metadata_file = st.sidebar.file_uploader("Metadata JSON", type=["json"])
+    metadata_file = st.sidebar.file_uploader(
+        "Паспорт и служебные параметры JSON", type=["json"]
+    )
     if protocol_file is None or metadata_file is None:
-        st.info("Загрузите протокол и metadata JSON. Пользовательские файлы не подменяются demo-набором.")
+        st.info(
+            "Загрузите протокол и JSON с паспортом и служебными параметрами. "
+            "Пользовательские файлы не подменяются демонстрационным набором."
+        )
         st.stop()
 
     protocol_bytes = protocol_file.getvalue()
@@ -615,10 +803,11 @@ def _load_inputs() -> dict:
         import_mode = st.sidebar.radio(
             "Режим Excel-импорта",
             ["strict", "interactive", "heuristic"],
+            format_func=_enum_formatter("import"),
             captions=[
                 "Неизвестная схема блокирует расчёт",
                 "Явное сохранённое сопоставление",
-                "Legacy-совместимость с предупреждением",
+                "Совместимость со старым форматом с предупреждением",
             ],
         )
         try:
@@ -646,7 +835,7 @@ def _load_inputs() -> dict:
             suggested_row = selected_schema.get("header_row")
             selected_header_row = int(
                 st.sidebar.number_input(
-                    "Строка заголовков (1-based)",
+                    "Строка заголовков (нумерация с 1)",
                     min_value=1,
                     max_value=200_000,
                     value=int(suggested_row or 1),
@@ -665,11 +854,12 @@ def _load_inputs() -> dict:
             partial_sheet_scope = import_mode != "interactive"
         else:
             st.sidebar.caption(
-                "Будут импортированы все распознанные листы; служебные листы фиксируются в QC."
+                "Будут импортированы все распознанные листы; служебные листы фиксируются "
+                "в журнале контроля качества."
             )
         if import_mode == "interactive":
             mapping_file = st.sidebar.file_uploader(
-                "Сохранённый mapping JSON (необязательно)",
+                "Сохранённое сопоставление JSON (необязательно)",
                 type=["json"],
                 key=f"mapping_file_{file_key}_{selected_sheet}_{selected_header_row}",
             )
@@ -679,7 +869,7 @@ def _load_inputs() -> dict:
                 mapping_bytes = mapping_file.getvalue()
                 saved_mapping = json.loads(mapping_bytes.decode("utf-8-sig"))
                 if not isinstance(saved_mapping, dict):
-                    raise ValueError("Mapping JSON должен быть объектом.")
+                    raise ValueError("Файл сопоставления JSON должен быть объектом.")
                 mapping_file_sha256 = hashlib.sha256(mapping_bytes).hexdigest()
             mapping_state_key = provenance_key(
                 json.dumps(
@@ -752,7 +942,7 @@ def _load_inputs() -> dict:
                     else:
                         column_mapping.pop(field, None)
             st.sidebar.download_button(
-                "Скачать mapping JSON",
+                "Скачать сопоставление JSON",
                 json.dumps(column_mapping, ensure_ascii=False, indent=2).encode("utf-8"),
                 "excel_column_mapping.json",
                 "application/json",
@@ -777,10 +967,10 @@ def _load_inputs() -> dict:
             st.subheader("Предпросмотр сопоставления Excel")
             st.caption(
                 f"Лист: {selected_sheet}; строка заголовков: {selected_header_row}; "
-                f"подпись mapping: {mapping_signature}"
+                f"подпись сопоставления: {mapping_signature}"
             )
             if preview_imported.frame.empty:
-                st.warning("По текущему mapping не распознано ни одной строки протокола.")
+                st.warning("По текущему сопоставлению не распознано ни одной строки протокола.")
             else:
                 preview_columns = [
                     column
@@ -806,21 +996,24 @@ def _load_inputs() -> dict:
                     if column in preview_imported.frame.columns
                 ]
                 st.dataframe(
-                    _display_safe_frame(preview_imported.frame[preview_columns].head(10)),
+                    _localized_frame(
+                        preview_imported.frame[preview_columns].head(10),
+                        "protocol_preview",
+                    ),
                     width="stretch",
                     hide_index=True,
                 )
             if preview_imported.issues:
                 with st.expander("Диагностика предпросмотра", expanded=True):
                     st.dataframe(
-                        _display_safe_frame(_issue_frame(preview_imported.issues)),
+                        _localized_issue_frame(_issue_frame(preview_imported.issues)),
                         width="stretch",
                         hide_index=True,
                     )
             if len(preview_imported.raw_cells):
                 with st.expander("Исходные координаты ячеек предпросмотра"):
                     st.dataframe(
-                        _display_safe_frame(preview_imported.raw_cells.head(50)),
+                        _localized_frame(preview_imported.raw_cells.head(50), "raw_cells"),
                         width="stretch",
                         hide_index=True,
                     )
@@ -829,7 +1022,9 @@ def _load_inputs() -> dict:
                 key=f"confirm_mapping_{mapping_signature}",
             )
             if not mapping_confirmed:
-                st.info("Проверьте предпросмотр и явно подтвердите mapping перед расчётом.")
+                st.info(
+                    "Проверьте предпросмотр и явно подтвердите сопоставление перед расчётом."
+                )
                 st.stop()
 
     config = {
@@ -909,7 +1104,10 @@ except Exception as exc:
 import_blocking = [item for item in import_issues if bool(item.blocks_processing)]
 if import_blocking:
     st.title(f"Soil Stamp Antonov {VERSION}")
-    st.error("Схема импорта содержит блокирующие ошибки. Исправьте mapping или выберите другой режим.")
+    st.error(
+        "Схема импорта содержит блокирующие ошибки. "
+        "Исправьте сопоставление или выберите другой режим."
+    )
     _render_blocking_diagnostics(input_context, import_issues, key_prefix="import_blocking")
     st.stop()
 
@@ -946,13 +1144,13 @@ try:
     base_prepared.attrs.clear()
 except Exception as exc:
     st.title(f"Soil Stamp Antonov {VERSION}")
-    st.error(f"Metadata или калибровка некорректны: {exc}")
+    st.error(f"Паспорт, служебные параметры или калибровка некорректны: {exc}")
     runtime_issue = ValidationIssue(
         "error",
         "processing_exception",
         f"Подготовка измерений завершилась исключением: {exc}",
         raw_value=str(exc),
-        suggested_action="Скачайте диагностический ZIP и проверьте metadata/калибровку.",
+        suggested_action=_PROCESSING_EXCEPTION_ACTION_CANONICAL,
     )
     _render_blocking_diagnostics(
         input_context,
@@ -975,6 +1173,7 @@ st.sidebar.header("Рабочий слой")
 correction_mode = st.sidebar.radio(
     "Осадка",
     ["raw", "zero_shifted", "seating_corrected"],
+    format_func=_enum_formatter("correction"),
     captions=[
         "Исходная кривая",
         "Сдвиг только по измеренной нулевой точке",
@@ -1012,9 +1211,11 @@ selected_indicator_aggregation = _scope_indicator_table(
 
 st.title(f"Soil Stamp Antonov {VERSION}")
 st.caption(
-    f"Слой: {correction_mode} · ревизия {st.session_state.revision} · "
+    f"Слой: {label_for_enum('correction', correction_mode)} · "
+    f"ревизия {st.session_state.revision} · "
     f"{filtered['test_id'].nunique()} испытаний · источник "
-    f"{import_info.get('source_type', import_info.get('format', 'unknown'))} · source SHA-256 "
+    f"{label_for_enum('import', import_info.get('source_type', import_info.get('format', 'unknown')))} · "
+    "SHA-256 источника "
     f"{input_context['provenance'].input_file_sha256[:12]}"
 )
 manual_service = st.session_state.get(MANUAL_SERVICE_KEY)
@@ -1027,13 +1228,13 @@ if (
     and manual_current_hash != st.session_state.get(MANUAL_ACTIVE_HASH_KEY)
 ):
     st.warning(
-        "Активный анализ построен по предыдущему snapshot ручного черновика. "
-        "Текущие правки не применены; передайте новый snapshot явно."
+        "Активный анализ построен по предыдущему снимку ручного черновика. "
+        "Текущие правки не применены; передайте новый снимок явно."
     )
 
 tabs = st.tabs(
     [
-        "Импорт и QC",
+        "Импорт и контроль качества",
         "Коррекции",
         "Графики",
         "pcr и E",
@@ -1054,12 +1255,15 @@ with tabs[0]:
     c3.metric("Измеренных осадок", int(prepared["is_measured"].sum()))
     c4.metric("Событий разрушения", int(prepared["is_failure"].sum()))
     st.subheader("Параметры импорта")
-    st.json(import_info, expanded=False)
+    st.json(display_mapping(import_info), expanded=False)
     st.dataframe(
-        pd.DataFrame(
-            effective_conversion_parameters(
-                metadata, raw["test_id"].dropna().astype(str).unique().tolist()
-            )
+        _localized_frame(
+            pd.DataFrame(
+                effective_conversion_parameters(
+                    metadata, raw["test_id"].dropna().astype(str).unique().tolist()
+                )
+            ),
+            "conversion_parameters",
         ),
         width="stretch",
         hide_index=True,
@@ -1069,23 +1273,13 @@ with tabs[0]:
     if passport["complete"]:
         st.success("Обязательные поля паспорта заполнены.")
     else:
-        st.warning("Паспорт неполон: " + ", ".join(passport["missing"]))
+        st.warning(
+            "Паспорт неполон: "
+            + ", ".join(_passport_field_label(name) for name in passport["missing"])
+        )
     with st.expander("Поля паспорта"):
         st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "field": name,
-                        "value": (
-                            json.dumps(value, ensure_ascii=False, default=str)
-                            if isinstance(value, (dict, list, tuple))
-                            else "" if value is None else str(value)
-                        ),
-                        "filled": name not in passport["missing"],
-                    }
-                    for name, value in passport["fields"].items()
-                ]
-            ),
+            _passport_fields_frame(passport),
             width="stretch",
             hide_index=True,
         )
@@ -1123,20 +1317,21 @@ with tabs[0]:
             "compatibility_mode",
         ]
         st.dataframe(
-            _display_safe_frame(
+            _localized_frame(
                 selected_indicator_passports[
                     [
                         column
                         for column in passport_columns
                         if column in selected_indicator_passports
                     ]
-                ]
+                ],
+                "indicator_passports",
             ),
             width="stretch",
             hide_index=True,
         )
         st.download_button(
-            "Скачать indicator_calibration_parameters.csv",
+            "Скачать параметры калибровки индикаторов (CSV)",
             selected_indicator_passports.to_csv(index=False).encode("utf-8-sig"),
             "indicator_calibration_parameters.csv",
             "text/csv",
@@ -1157,7 +1352,7 @@ with tabs[0]:
         c1, c2, c3 = st.columns(3)
         c1.metric("Строк преобразования", len(selected_indicator_audit))
         c2.metric("Переходов через ноль", zero_crossings)
-        c3.metric("QC не ok", int(status.ne("ok").sum()))
+        c3.metric("Строк с замечаниями", int(status.ne("ok").sum()))
         audit_columns = [
             "test_id",
             "channel",
@@ -1179,23 +1374,24 @@ with tabs[0]:
             "correction_record_ids",
         ]
         st.dataframe(
-            _display_safe_frame(
+            _localized_frame(
                 selected_indicator_audit[
                     [column for column in audit_columns if column in selected_indicator_audit]
-                ]
+                ],
+                "indicator_processing_audit",
             ),
             width="stretch",
             hide_index=True,
         )
         c1, c2 = st.columns(2)
         c1.download_button(
-            "Скачать indicator_processing_audit.csv",
+            "Скачать журнал преобразования показаний (CSV)",
             selected_indicator_audit.to_csv(index=False).encode("utf-8-sig"),
             "indicator_processing_audit.csv",
             "text/csv",
         )
         c2.download_button(
-            "Скачать indicator_processing_events.csv",
+            "Скачать журнал событий индикаторов (CSV)",
             selected_indicator_events.to_csv(index=False).encode("utf-8-sig"),
             "indicator_processing_events.csv",
             "text/csv",
@@ -1205,13 +1401,14 @@ with tabs[0]:
                 st.info("Событий преобразования нет.")
             else:
                 st.dataframe(
-                    _display_safe_frame(selected_indicator_events),
+                    _localized_frame(selected_indicator_events, "indicator_events"),
                     width="stretch",
                     hide_index=True,
                 )
     st.subheader("Агрегация осадки")
     st.caption(
-        "Фиксированный состав required/used/missing и результат политики для каждой строки."
+        "Для каждой строки показаны обязательные, использованные и отсутствующие каналы, "
+        "а также результат применённой политики."
     )
     if selected_indicator_aggregation.empty:
         st.info("Осадка по индикаторным каналам для выбранных испытаний не формировалась.")
@@ -1232,35 +1429,36 @@ with tabs[0]:
             "tilt_direction_resolved",
         ]
         st.dataframe(
-            _display_safe_frame(
+            _localized_frame(
                 selected_indicator_aggregation[
                     [
                         column
                         for column in aggregation_columns
                         if column in selected_indicator_aggregation
                     ]
-                ]
+                ],
+                "indicator_aggregation",
             ),
             width="stretch",
             hide_index=True,
         )
         st.download_button(
-            "Скачать indicator_aggregation_results.csv",
+            "Скачать результаты агрегации осадки (CSV)",
             selected_indicator_aggregation.to_csv(index=False).encode("utf-8-sig"),
             "indicator_aggregation_results.csv",
             "text/csv",
         )
-    st.subheader("Provenance")
-    st.json(input_context["provenance"].to_dict(), expanded=False)
+    st.subheader("Происхождение данных и воспроизводимость")
+    st.json(display_mapping(input_context["provenance"].to_dict()), expanded=False)
     if len(input_context["raw_cells"]):
         with st.expander("Исходные ячейки и распознанные значения"):
             st.dataframe(
-                _display_safe_frame(input_context["raw_cells"]),
+                _localized_frame(input_context["raw_cells"], "raw_cells"),
                 width="stretch",
                 hide_index=True,
             )
             st.download_button(
-                "Скачать raw_cells.csv",
+                "Скачать исходные ячейки (CSV)",
                 input_context["raw_cells"].to_csv(index=False).encode("utf-8-sig"),
                 "raw_cells.csv",
                 "text/csv",
@@ -1268,7 +1466,7 @@ with tabs[0]:
     if all_issues:
         st.subheader("Контроль качества")
         st.dataframe(
-            _display_safe_frame(_issue_frame(all_issues)),
+            _localized_issue_frame(_issue_frame(all_issues)),
             width="stretch",
             hide_index=True,
         )
@@ -1305,16 +1503,23 @@ with tabs[0]:
         "comment",
     ]
     st.dataframe(
-        _display_safe_frame(
-            filtered[[column for column in protocol_columns if column in filtered]]
+        _localized_frame(
+            filtered[[column for column in protocol_columns if column in filtered]],
+            "protocol_timeline",
         ),
         width="stretch",
         hide_index=True,
     )
     st.subheader("Разрушение и цензурирование")
-    st.dataframe(failures[failures["test_id"].isin(selected_tests)], width="stretch", hide_index=True)
-    with st.expander("Metadata"):
-        st.json(metadata)
+    st.dataframe(
+        _localized_frame(
+            failures[failures["test_id"].isin(selected_tests)], "failure_summary"
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    with st.expander("Паспорт и служебные параметры"):
+        st.json(display_mapping(metadata))
 
 with tabs[1]:
     st.write(
@@ -1327,7 +1532,11 @@ with tabs[1]:
     correction_preview["difference_mm"] = (
         correction_preview["settlement_mm"] - correction_preview["settlement_raw_mm"]
     )
-    st.dataframe(_display_safe_frame(correction_preview), width="stretch", hide_index=True)
+    st.dataframe(
+        _localized_frame(correction_preview, "settlement_correction"),
+        width="stretch",
+        hide_index=True,
+    )
 
     st.subheader("Посадочная поправка")
     with st.form("seating_form"):
@@ -1359,20 +1568,23 @@ with tabs[1]:
             st.session_state.e_latest = {}
             st.session_state.figure_exports = {}
             st.session_state.bundle_cache = {}
-            st.success("Новая ревизия записана в audit trail.")
+            st.success("Новая ревизия записана в журнал решений.")
             st.rerun()
         except ValueError as exc:
             st.error(str(exc))
 
     st.subheader("Ручная коррекция одной точки")
     if correction_mode == "raw":
-        st.info("Слой raw доступен только для чтения. Выберите zero_shifted или seating_corrected.")
+        st.info(
+            "Исходный слой доступен только для чтения. Выберите нулевой уровень "
+            "по измеренной точке или слой с посадочной поправкой."
+        )
     else:
         with st.form("manual_point_form"):
             manual_test = st.selectbox("Испытание", test_options, key="manual_test")
             test_rows = prepared[prepared["test_id"].astype(str) == manual_test]
             sequence_options = test_rows["sequence_no"].astype(int).tolist()
-            manual_sequence = st.selectbox("sequence_no", sequence_options)
+            manual_sequence = st.selectbox("Порядковый номер строки", sequence_options)
             current_row = test_rows[test_rows["sequence_no"] == manual_sequence].iloc[0]
             current_value = current_row["settlement_mm"]
             manual_value = st.number_input(
@@ -1408,7 +1620,7 @@ with tabs[1]:
                 st.session_state.e_latest = {}
                 st.session_state.figure_exports = {}
                 st.session_state.bundle_cache = {}
-                st.success("Коррекция добавлена как новая ревизия; raw не изменён.")
+                st.success("Коррекция добавлена как новая ревизия; исходные данные не изменены.")
                 st.rerun()
             except ValueError as exc:
                 st.error(str(exc))
@@ -1434,7 +1646,11 @@ with tabs[2]:
         "failure-analysis/1.0 · summary_method=none · "
         "сводная точечная оценка Fu/pu не рассчитывается"
     )
-    st.dataframe(_display_safe_frame(selected_failures), hide_index=True, width="stretch")
+    st.dataframe(
+        _localized_frame(selected_failures, "failure_summary"),
+        hide_index=True,
+        width="stretch",
+    )
     available_capacity_kinds = {
         value
         for value in selected_failures.get("capacity_kind", pd.Series(dtype=str))
@@ -1449,6 +1665,7 @@ with tabs[2]:
         "Ось диаграммы разрушения",
         failure_axis_options,
         key="failure_interval_axis",
+        format_func=_enum_formatter("load_kind"),
     )
     failure_analysis["plot_capacity_axis"] = failure_axis
     failure_plot_output = None
@@ -1458,7 +1675,7 @@ with tabs[2]:
             capacity_axis=failure_axis,
         )
         st.pyplot(failure_plot_output.figure, width="stretch")
-        st.caption(failure_plot_output.caption)
+        st.caption(display_text(failure_plot_output.caption))
     except ValueError as exc:
         st.warning(f"Диаграмма интервалов недоступна: {exc}")
 
@@ -1467,6 +1684,7 @@ with tabs[2]:
     graph_mode = controls[0].selectbox(
         "Режим",
         ["raw_protocol", "antonov_publication", "group_mean_ci", "diagnostic", "normalized"],
+        format_func=_enum_formatter("graph"),
     )
     if graph_mode == "normalized":
         axis_options = [
@@ -1483,20 +1701,33 @@ with tabs[2]:
         axis_options = ["F-s", "p-s", "p-s/D"]
         default_axis = 1 if filtered["D_mm"].nunique() > 1 else 0
     axis_mode = controls[1].selectbox("Оси", axis_options, index=default_axis)
-    ci_method = controls[2].selectbox("95% ДИ", ["t", "simultaneous_bootstrap"])
-    bootstrap_graph = controls[3].number_input("Bootstrap", min_value=100, max_value=5000, value=300, step=100)
+    ci_method = controls[2].selectbox(
+        "95% доверительный интервал",
+        ["t", "simultaneous_bootstrap"],
+        format_func=_enum_formatter("ci_method"),
+    )
+    bootstrap_graph = controls[3].number_input(
+        "Число повторов бутстрепа", min_value=100, max_value=5000, value=300, step=100
+    )
     grid_controls = st.columns(3)
-    major_step = grid_controls[0].number_input("Major step (0 = auto)", min_value=0.0, value=0.0, step=10.0)
-    minor_step = grid_controls[1].number_input("Minor step (0 = auto)", min_value=0.0, value=0.0, step=5.0)
+    major_step = grid_controls[0].number_input(
+        "Шаг основных делений (0 — автоматически)", min_value=0.0, value=0.0, step=10.0
+    )
+    minor_step = grid_controls[1].number_input(
+        "Шаг промежуточных делений (0 — автоматически)",
+        min_value=0.0,
+        value=0.0,
+        step=5.0,
+    )
     fixed = grid_controls[2].checkbox("Фиксированный масштаб")
     fixed_axes = None
     if fixed:
         limits = st.columns(4)
         fixed_axes = (
-            limits[0].number_input("x min", value=0.0),
-            limits[1].number_input("x max", value=500.0),
-            limits[2].number_input("s min", value=0.0),
-            limits[3].number_input("s max", value=10.0),
+            limits[0].number_input("Минимум по горизонтали", value=0.0),
+            limits[1].number_input("Максимум по горизонтали", value=500.0),
+            limits[2].number_input("Минимальная осадка", value=0.0),
+            limits[3].number_input("Максимальная осадка", value=10.0),
         )
     diagnostic_result = None
     if graph_mode == "diagnostic":
@@ -1552,7 +1783,7 @@ with tabs[2]:
         for warning in plot_output.warnings:
             st.warning(warning)
         st.pyplot(plot_output.figure, width="stretch")
-        st.caption(plot_output.caption)
+        st.caption(display_text(plot_output.caption))
         export_spec = {
             "dataset": dataset_key,
             "revision": st.session_state.revision,
@@ -1618,14 +1849,20 @@ with tabs[3]:
     analysis_test = st.selectbox("Испытание", selected_tests, key="analysis_test")
     test_frame = filtered[filtered["test_id"].astype(str) == analysis_test]
     a1, a2, a3 = st.columns(3)
-    bootstrap_n = a1.number_input("Bootstrap pcr/E", min_value=100, max_value=10000, value=500, step=100)
-    seed = a2.number_input("Seed", min_value=0, value=202604, step=1)
+    bootstrap_n = a1.number_input(
+        "Число повторов бутстрепа для pcr/E",
+        min_value=100,
+        max_value=10000,
+        value=500,
+        step=100,
+    )
+    seed = a2.number_input("Начальное значение генератора", min_value=0, value=202604, step=1)
     calculate = a3.button("Рассчитать pcr", type="primary", width="stretch")
     result_context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{analysis_test}"
     result_key = f"{result_context}:{int(bootstrap_n)}:{int(seed)}"
     if calculate:
         try:
-            with st.spinner("Сегментированная регрессия и bootstrap…"):
+            with st.spinner("Сегментированная регрессия и бутстреп…"):
                 st.session_state.pcr_results[result_key] = fit_segmented_pcr(
                     test_frame, bootstrap=int(bootstrap_n), seed=int(seed)
                 )
@@ -1637,7 +1874,7 @@ with tabs[3]:
     pcr_result = st.session_state.pcr_results.get(result_key)
     if pcr_result:
         metrics = st.columns(4)
-        metrics[0].metric("pcr auto, кПа", f"{pcr_result.pcr_auto:.2f}")
+        metrics[0].metric("pcr автоматически, кПа", f"{pcr_result.pcr_auto:.2f}")
         metrics[1].metric(
             "95% ДИ, кПа",
             (
@@ -1682,7 +1919,7 @@ with tabs[3]:
             except ValueError as exc:
                 st.error(str(exc))
     else:
-        st.info("Запустите расчёт pcr. Используются устойчивые точки первой ветви loading.")
+        st.info("Запустите расчёт pcr. Используются устойчивые точки первой ветви нагружения.")
 
     st.divider()
     st.subheader("E_stamp_app и жёсткость")
@@ -1700,7 +1937,7 @@ with tabs[3]:
                 available_p_range=(pmin_data, pmax_data),
             )
         except ValueError as exc:
-            st.warning(f"Metadata методики E требует исправления: {exc}")
+            st.warning(f"Паспорт методики E требует исправления: {exc}")
             base_e_resolution = resolve_modulus_method(
                 {}, analysis_test, available_p_range=(pmin_data, pmax_data)
             )
@@ -1724,6 +1961,7 @@ with tabs[3]:
                 "Профиль методики E",
                 profile_options,
                 index=profile_index,
+                format_func=_enum_formatter("methodology_profile"),
             )
             range_source_options = ["explicit", "accepted_pcr", "project_profile"]
             source_index = (
@@ -1735,6 +1973,7 @@ with tabs[3]:
                 "Источник диапазона E",
                 range_source_options,
                 index=source_index,
+                format_func=_enum_formatter("range_source"),
             )
             p_range = method_controls[2].slider(
                 "Диапазон p, кПа",
@@ -1873,10 +2112,11 @@ with tabs[3]:
         if moduli is not None:
             resolved = moduli.attrs.get("modulus_resolution", {})
             st.caption(
-                f"Профиль: {resolved.get('profile_id', '—')}@"
+                f"Профиль: {label_for_enum('methodology_profile', resolved.get('profile_id', '—'))}@"
                 f"{resolved.get('profile_version', '—')}; статус: "
-                f"{resolved.get('review_status', 'review_required')}; "
-                f"диапазон: {resolved.get('p_range_source', '—')}."
+                f"{label_for_enum('review', resolved.get('review_status', 'review_required'))}; "
+                "диапазон: "
+                f"{label_for_enum('range_source', resolved.get('p_range_source', '—'))}."
             )
             primary = moduli[moduli["is_primary"].fillna(False).astype(bool)]
             headline = moduli[moduli["method"].isin(["E_regression", "E_secant"])]
@@ -1885,13 +2125,23 @@ with tabs[3]:
                     "Основной E не выдан: результат является диагностическим и требует "
                     "инженерной проверки методики/диапазона."
                 )
-                st.dataframe(headline, width="stretch", hide_index=True)
+                st.dataframe(
+                    _localized_frame(headline, "modulus_results"),
+                    width="stretch",
+                    hide_index=True,
+                )
             else:
                 st.success("Основной условный E рассчитан по подтверждённому контракту.")
-                st.dataframe(primary, width="stretch", hide_index=True)
+                st.dataframe(
+                    _localized_frame(primary, "modulus_results"),
+                    width="stretch",
+                    hide_index=True,
+                )
             with st.expander("Дополнительные и диагностические результаты E"):
                 st.dataframe(
-                    moduli[~moduli.index.isin(primary.index)],
+                    _localized_frame(
+                        moduli[~moduli.index.isin(primary.index)], "modulus_results"
+                    ),
                     width="stretch",
                     hide_index=True,
                 )
@@ -1901,9 +2151,13 @@ with tabs[3]:
                 float(test_frame["D_mm"].dropna().iloc[0]),
             )
             with st.expander("Чувствительность к ν и коэффициенту формы"):
-                st.dataframe(sensitivity, width="stretch", hide_index=True)
+                st.dataframe(
+                    _localized_frame(sensitivity, "modulus_sensitivity"),
+                    width="stretch",
+                    hide_index=True,
+                )
     else:
-        st.warning("Недостаточно loading-точек для E.")
+        st.warning("Недостаточно точек нагружения для E.")
 
 with tabs[4]:
     groups = filtered["group"].astype(str).unique().tolist()
@@ -1911,10 +2165,21 @@ with tabs[4]:
         st.info("Для сравнения нужны минимум две группы.")
     else:
         gcols = st.columns(4)
-        baseline_group = gcols[0].selectbox("Baseline", groups, index=0)
+        baseline_group = gcols[0].selectbox(
+            "Контрольная группа",
+            groups,
+            index=0,
+            format_func=_enum_formatter("group"),
+        )
         reinforced_candidates = [name for name in groups if name != baseline_group]
-        reinforced_group = gcols[1].selectbox("Reinforced", reinforced_candidates)
-        compare_bootstrap = gcols[2].number_input("Bootstrap сравнения", 100, 10000, 1000, 100)
+        reinforced_group = gcols[1].selectbox(
+            "Армированная группа",
+            reinforced_candidates,
+            format_func=_enum_formatter("group"),
+        )
+        compare_bootstrap = gcols[2].number_input(
+            "Число повторов бутстрепа", 100, 10000, 1000, 100
+        )
         run_compare = gcols[3].button("Сравнить", type="primary", width="stretch")
         comparison_spec = {
             "dataset": dataset_key,
@@ -1947,7 +2212,11 @@ with tabs[4]:
                 st.error(f"Сравнение не рассчитано: {exc}")
         comparison = st.session_state.analysis_tables.get(comparison_key)
         if comparison is not None:
-            st.dataframe(comparison, width="stretch", hide_index=True)
+            st.dataframe(
+                _localized_frame(comparison, "group_comparison"),
+                width="stretch",
+                hide_index=True,
+            )
             pairing_warnings: list[str] = []
             if "pairing_warning" in comparison:
                 pairing_warnings.extend(
@@ -1983,23 +2252,43 @@ with tabs[4]:
 with tabs[5]:
     st.subheader("Инкременты, податливость и жёсткость")
     derivatives = derivative_diagnostics(filtered)
-    st.dataframe(derivatives, width="stretch", hide_index=True)
+    st.dataframe(
+        _localized_frame(derivatives, "derivative_diagnostics"),
+        width="stretch",
+        hide_index=True,
+    )
     qcols = st.columns(2)
     target_p = qcols[0].number_input("Осадка при p, кПа", value=100.0)
     target_s = qcols[1].number_input("Давление при s, мм", value=1.0)
     settlement_at_target = value_at_pressure(filtered, target_p)
     pressure_at_target = pressure_at_settlement(filtered, target_s)
-    st.dataframe(settlement_at_target, width="stretch", hide_index=True)
-    st.dataframe(pressure_at_target, width="stretch", hide_index=True)
+    st.dataframe(
+        _localized_frame(settlement_at_target, "settlement_at_pressure"),
+        width="stretch",
+        hide_index=True,
+    )
+    st.dataframe(
+        _localized_frame(pressure_at_target, "pressure_at_settlement"),
+        width="stretch",
+        hide_index=True,
+    )
 
     st.subheader("Работа деформирования и разгрузка")
     work_table = deformation_work(filtered)
-    st.dataframe(work_table, width="stretch", hide_index=True)
+    st.dataframe(
+        _localized_frame(work_table, "deformation_work"),
+        width="stretch",
+        hide_index=True,
+    )
     hysteresis = hysteresis_metrics(filtered)
     if hysteresis.empty:
         st.info("В выбранных испытаниях нет полной ветви разгрузки.")
     else:
-        st.dataframe(hysteresis, width="stretch", hide_index=True)
+        st.dataframe(
+            _localized_frame(hysteresis, "hysteresis"),
+            width="stretch",
+            hide_index=True,
+        )
 
     st.subheader("Время стабилизации")
     rate = st.number_input("Порог |ds/dt|, мм/мин", min_value=0.0001, value=0.01, format="%.4f")
@@ -2007,7 +2296,11 @@ with tabs[5]:
     if stabilization.empty:
         st.info("Для расчёта нужны повторные временные измерения внутри ступени.")
     else:
-        st.dataframe(stabilization, width="stretch", hide_index=True)
+        st.dataframe(
+            _localized_frame(stabilization, "stabilization"),
+            width="stretch",
+            hide_index=True,
+        )
 
     st.subheader("Осадка центра и крен")
     tilt = center_and_tilt(
@@ -2019,13 +2312,17 @@ with tabs[5]:
             filtered.get("indicator_calibration_confirmed", pd.Series(False, index=filtered.index)).any()
         ):
             st.info(
-                "Расчёт центра и крена отключён: калибровка indicator_* не подтверждена явно. "
-                "Прямая settlement при этом остаётся активной."
+                "Расчёт центра и крена отключён: калибровка каналов индикаторов не "
+                "подтверждена явно. Непосредственно заданная осадка при этом остаётся активной."
             )
         else:
             st.info("Направление крена доступно только при координатах минимум трёх индикаторов.")
     else:
-        st.dataframe(tilt, width="stretch", hide_index=True)
+        st.dataframe(
+            _localized_frame(tilt, "center_and_tilt"),
+            width="stretch",
+            hide_index=True,
+        )
 
 with tabs[6]:
     pcr_by_test = {}
@@ -2158,7 +2455,7 @@ with tabs[6]:
         ),
     )
     st.subheader("Отчёт")
-    st.markdown(report)
+    st.markdown(_localized_report_preview(report))
     st.download_button("Скачать отчёт Markdown", report.encode("utf-8"), "soil_stamp_report_ru.md", "text/markdown")
 
     result_tables = {
@@ -2439,7 +2736,7 @@ with tabs[6]:
             "application/zip",
         )
         report_downloads[3].download_button(
-            "Скачать SHA-256 manifest",
+            "Скачать реестр SHA-256",
             cached_report_package["artifact_manifest.json"],
             "artifact_manifest.json",
             "application/json",
@@ -2452,14 +2749,18 @@ with tabs[6]:
             "soil_stamp_reproducibility.zip",
             "application/zip",
         )
-    st.subheader("Audit trail")
+    st.subheader("Журнал решений")
     audit_frame = st.session_state.audit.to_frame()
     if audit_frame.empty:
         st.info("Ручных решений пока нет.")
     else:
-        st.dataframe(audit_frame, width="stretch", hide_index=True)
+        st.dataframe(
+            _localized_frame(audit_frame, "decision_audit"),
+            width="stretch",
+            hide_index=True,
+        )
         st.download_button(
-            "Скачать audit JSON",
+            "Скачать журнал решений JSON",
             st.session_state.audit.to_json().encode("utf-8"),
             "audit.json",
             "application/json",
