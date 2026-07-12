@@ -392,13 +392,1515 @@ def _load_inputs() -> dict:
             "–†–µ–∂–∏–º Excel-–∏–º–ø–æ—Ä—Ç–∞",
             ["strict", "interactive", "heuristic"],
             captions=[
-                "–ù–µ–∏–∑–≤–µ—Å—Ç–Ω–∞—è —Å—Ö–µ–º–∞ –±–ª–æ–∫–∏—Ä—É–µ—Ç —Ä–∞◊Œ|ﬁ⁄$z{-ÆÈ‹j◊ù-›]›çRΩ]M=]"-≠-Ì--¬≠¢Ì˝ç-]ΩÕ›ÌR‚"ê–†–ßvóFÇF'5≥U”†–¢7BÁ7V&ÜVFW"Ç-	ç›≠]Õ]›-≤¬˝ÌM-Ωç-Ì-¬Çm-≠Ì-¬"ê–¢FW&ófFófW2“FW&ófFófUˆFñvÊ˜7Fñ72Üfñ«FW&VBê–¢7BÊFFg&÷RÜFW&ófFófW2¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–¢6ˆ«2“7BÊ6ˆ«V÷Á2É"ê–¢F&vWE˜“6ˆ«5≥“ÊÁV÷&W%ˆñÁWBÇ-	ÌM≠˝Ç¬≠	˝"¬f«VS”„ê–¢F&vWE˜2“6ˆ«5≥“ÊÁV÷&W%ˆñÁWBÇ-	M-Ω]›çR˝Ç2¬Õ¬"¬f«VS”„ê–¢6WGF∆V÷VÁEˆE˜F&vWB“f«VUˆE˜&W77W&RÜfñ«FW&VB¬F&vWE˜ê–¢&W77W&UˆE˜F&vWB“&W77W&UˆE˜6WGF∆V÷VÁBÜfñ«FW&VB¬F&vWE˜2ê–¢7BÊFFg&÷Rá6WGF∆V÷VÁEˆE˜F&vWB¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–¢7BÊFFg&÷Rá&W77W&UˆE˜F&vWB¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–†–¢7BÁ7V&ÜVFW"Ç-
-Ì-M]MÌÕçÌ-›çÚÇ}==}≠"ê–¢v˜&µ˜F&∆R“FVf˜&÷FñˆÂ˜v˜&≤Üfñ«FW&VBê–¢7BÊFFg&÷Ráv˜&µ˜F&∆R¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–¢áó7FW&W6ó2“áó7FW&W6ó5ˆ÷WG&ñ72Üfñ«FW&VBê–¢ñbáó7FW&W6ó2ÊV◊Gì†–¢7BÊñÊfÚÇ-	"-Ω››ΩRç˝Ω-›ç˝R›]"˝ÌΩ›Ìí-]--Ç}==}≠Ç‚"ê–¢V«6S†–¢7BÊFFg&÷RÜáó7FW&W6ó2¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–†–¢7BÁ7V&ÜVFW"Ç-	-]ÕÚ-çΩç}mçÇ"ê–¢&FR“7BÊÁV÷&W%ˆñÁWBÇ-	˝ÌÌ2∆G2ˆGG¬¬Õ¬˝Õç“"¬÷ñÂ˜f«VS”„¬f«VS”„¬f˜&÷C“"R„Fb"ê–¢7F&ñ∆ó¶Fñˆ‚“Fñ÷U˜7F&ñ∆ó¶Fñˆ‚Üfñ«FW&VB¬&FU˜Fá&W6Üˆ∆Eˆ÷’˜W%ˆ÷ñ„÷f∆ˆBá&FRíê–¢ñb7F&ñ∆ó¶Fñˆ‚ÊV◊Gì†–¢7BÊñÊfÚÇ-	MΩÚ}-›=m›≤˝Ì--Ì›ΩR-]Õ]››ΩRç}Õ]]›çÚ-›=-Ç-=˝]›Ç‚"ê–¢V«6S†–¢7BÊFFg&÷Rá7F&ñ∆ó¶Fñˆ‚¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–†–¢7BÁ7V&ÜVFW"Ç-	ÌM≠m]›-Ç≠]“"ê–¢Fñ«B“6VÁFW%ˆÊE˜Fñ«BÄ–¢fñ«FW&VB¿–¢÷WFFFÊvWBÇ&ñÊFñ6F˜%˜˜6óFñˆÁ5ˆ÷“"í¿–¢ê–¢ñbFñ«BÊV◊Gì†–¢ñbÁíÜb&ñÊFñ6F˜%˜∂ñÊFWá“"ñ‚fñ«FW&VBÊ6ˆ«V÷Á2f˜"ñÊFWÇñ‚&ÊvRÉ¬RííÊBÊ˜B&ˆˆ¬Ä–¢fñ«FW&VBÊvWBÇ&ñÊFñ6F˜%ˆ6∆ñ'&FñˆÂˆ6ˆÊfó&÷VB"¬BÂ6W&ñW2Ñf«6R¬ñÊFWÉ÷fñ«FW&VBÊñÊFWÇííÊÁíÇê–¢ì†–¢7BÊñÊfÚÄ–¢-
-}"m]›-Ç≠]›Ì-≠ΩÌ}”¢≠ΩçÌ-≠ñÊFñ6F˜%Ú¢›R˝ÌM--]mM]›˝-›‚‚ –¢-	˝˝ÕÚ6WGF∆V÷VÁB˝Ç›-Ì¬Ì--Ú≠-ç-›Ìí‚ –¢ê–¢V«6S†–¢7BÊñÊfÚÇ-	›˝-Ω]›çR≠]›MÌ-=˝›‚-ÌΩÕ≠‚˝Ç≠ÌÌMç›-RÕç›çÕ=¬-Rç›Mç≠-ÌÌ"‚"ê–¢V«6S†–¢7BÊFFg&÷RáFñ«B¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–†–ßvóFÇF'5≥e”†–¢7%ˆ'ï˜FW7B“∑––¢f˜"FW7EˆñBñ‚6V∆V7FVE˜FW7G3†–¢6ˆÁFWáB“b'∂FF6WEˆ∂Wó”ß∑7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆÁ”ß∂6˜'&V7FñˆÂˆ÷ˆFW”ß∑FW7EˆñG“ –¢∆FW7Eˆ∂Wí“7BÁ6W76ñˆÂ˜7FFRÁ7%ˆ∆FW7BÊvWBÜ6ˆÁFWáBê–¢ñb∆FW7Eˆ∂WíÊB∆FW7Eˆ∂Wíñ‚7BÁ6W76ñˆÂ˜7FFRÁ7%˜&W7V«G3†–¢7%ˆ'ï˜FW7E∑FW7EˆñE““7BÁ6W76ñˆÂ˜7FFRÁ7%˜&W7V«G5∂∆FW7Eˆ∂Wï––¢U˜F&∆W2“µ–¢f˜"FW7EˆñBñ‚6V∆V7FVE˜FW7G3†¢6ˆÁFWáB“b'∂FF6WEˆ∂Wó”ß∑7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆÁ”ß∂6˜'&V7FñˆÂˆ÷ˆFW”ß∑FW7EˆñG“ ¢∆FW7EˆUˆ∂Wí“7BÁ6W76ñˆÂ˜7FFRÊUˆ∆FW7BÊvWBÜ6ˆÁFWáBê¢∆FW7EˆR“7BÁ6W76ñˆÂ˜7FFRÊÊ«ó6ó5˜F&∆W2ÊvWBÜ∆FW7EˆUˆ∂Wíê¢ñbó6ñÁ7FÊ6RÜ∆FW7EˆR¬B‰FFg&÷Rì†¢U˜F&∆W2ÊVÊBÜ∆FW7EˆRê¢&W˜'Eˆ÷ˆGV∆í“BÊ6ˆÊ6BÜU˜F&∆W2¬ñvÊ˜&UˆñÊFWÉ’G'VRíñbU˜F&∆W2V«6RÊˆÊP–¢7W'&VÁEˆ6Fñˆ‚“∆˜Eˆ˜WGWBÊ6Fñˆ‚ñb'∆˜Eˆ˜WGWB"ñ‚∆ˆ6«2ÇíÊB∆˜Eˆ˜WGWBó2Ê˜BÊˆÊRV«6RÊˆÊP–¢7W'&VÁE˜v&ÊñÊw2“∆˜Eˆ˜WGWBÁv&ÊñÊw2ñb'∆˜Eˆ˜WGWB"ñ‚∆ˆ6«2ÇíÊB∆˜Eˆ˜WGWBó2Ê˜BÊˆÊRV«6Rµ––†–¢FVbÊ«ó6ó5˜F&∆UˆñÂ˜66˜RÜÊ«ó6ó5ˆ∂Wí¬Ê«ó6ó5˜F&∆Rí”‚&ˆˆ√†¢ñbÊ˜Bó6ñÁ7FÊ6RÜÊ«ó6ó5˜F&∆R¬B‰FFg&÷Rì†¢&WGW&‚f«6P¢7V2“Ê«ó6ó5˜F&∆RÊGG'2ÊvWBÇ&Ê«ó6ó5˜7V2"¬∑“ê¢7V5˜FW7G2“7V2ÊvWBÇ'6V∆V7FVE˜FW7G2"¬∑7V2ÊvWBÇ'FW7EˆñB"ï“ê¢ñÂ˜66˜R“&ˆˆ¬Ä¢7V2ÊvWBÇ&FF6WB"í”“FF6WEˆ∂Wê¢ÊB7V2ÊvWBÇ'&Wfó6ñˆ‚"í”“7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆ‡¢ÊB7V2ÊvWBÇ&6˜'&V7FñˆÂˆ÷ˆFR"í”“6˜'&V7FñˆÂˆ÷ˆFP¢ÊB6WBÜfñ«FW"ÑÊˆÊR¬7V5˜FW7G2ííÊó77V'6WBá6WBá6V∆V7FVE˜FW7G2íê¢ê¢ñbÊ˜BñÂ˜66˜R˜"Ê˜B7G"ÜÊ«ó6ó5ˆ∂WííÁ7F'G7vóFÇÇ$S¢"ì†¢&WGW&‚ñÂ˜66˜P¢FW7EˆñB“7V2ÊvWBÇ'FW7EˆñB"ê¢6ˆÁFWáB“b'∂FF6WEˆ∂Wó”ß∑7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆÁ”ß∂6˜'&V7FñˆÂˆ÷ˆFW”ß∑FW7EˆñG“ ¢&WGW&‚7BÁ6W76ñˆÂ˜7FFRÊUˆ∆FW7BÊvWBÜ6ˆÁFWáBí”“Ê«ó6ó5ˆ∂Wê†–¢Ê«ó6ó5˜7V75ˆf˜%˜&˜fVÊÊ6R“µ–¢f˜"Ê«ó6ó5ˆ∂Wí¬Ê«ó6ó5˜F&∆Rñ‚7BÁ6W76ñˆÂ˜7FFRÊÊ«ó6ó5˜F&∆W2ÊóFV◊2Çì†¢ñbÊ«ó6ó5˜F&∆UˆñÂ˜66˜RÜÊ«ó6ó5ˆ∂Wí¬Ê«ó6ó5˜F&∆Rì†¢Ê«ó6ó5˜7V75ˆf˜%˜&˜fVÊÊ6RÊVÊBÄ–¢∞–¢&∂Wí#¢Ê«ó6ó5ˆ∂Wí¿–¢'7V2#¢Ê«ó6ó5˜F&∆RÊGG'2ÊvWBÇ&Ê«ó6ó5˜7V2"¬∑“í¿–¢––¢ê–¢&ˆ6W76ñÊuˆ6ˆÊfñr“∞–¢&ñ◊˜'B#¢ñÁWEˆ6ˆÁFWáE≤'&˜fVÊÊ6Uˆ6ˆÊfñr%“¿–¢&÷ÁV≈ˆG&gE˜6Ü#Sb#¢ñÁWEˆ6ˆÁFWáBÊvWBÇ&÷ÁV≈ˆG&gE˜6Ü#Sb"í¿–¢&÷ÁV≈ˆVFóEˆWfVÁEˆ6˜VÁB#¢∆V‚Ä–¢ñÁWEˆ6ˆÁFWáBÊvWBÇ&÷ÁV≈ˆVFóEˆWfVÁG2"í˜"µ––¢í¿–¢'&Wfó6ñˆ‚#¢7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆ‚¿–¢&6˜'&V7FñˆÂˆ÷ˆFR#¢6˜'&V7FñˆÂˆ÷ˆFR¿–¢'6VFñÊuˆˆfg6WG5ˆ÷“#¢7BÁ6W76ñˆÂ˜7FFRÁ6VFñÊuˆˆfg6WG2¿–¢&÷ÁV≈ˆ˜fW'&ñFW2#¢7BÁ6W76ñˆÂ˜7FFRÊ÷ÁV≈ˆ˜fW'&ñFW2¿–¢'6V∆V7FVE˜FW7G2#¢6˜'FVBá6V∆V7FVE˜FW7G2í¿–¢&w&Ç#¢∆ˆ6«2ÇíÊvWBÇ&Wá˜'E˜7V2"í¿–¢'7"#¢∂∂Wì¢f«VRÁFıˆFñ7BÇíf˜"∂Wí¬f«VRñ‚7%ˆ'ï˜FW7BÊóFV◊2Çó“¿–¢&Ê«ó6ó5˜7V72#¢Ê«ó6ó5˜7V75ˆf˜%˜&˜fVÊÊ6R¿–¢'F&vWE˜&W77W&Uˆµ#¢f∆ˆBáF&vWE˜í¿–¢'F&vWE˜6WGF∆V÷VÁEˆ÷“#¢f∆ˆBáF&vWE˜2í¿–¢'7F&ñ∆ó¶FñˆÂ˜&FUˆ÷’ˆ÷ñ‚#¢f∆ˆBá&FRí¿–¢&VFóEˆFV6ó6ñˆÁ2#¢∞–¢∞–¢∂Wì¢f«VP–¢f˜"∂Wí¬f«VRñ‚WfVÁBÊóFV◊2Çê–¢ñb∂WíÊ˜Bñ‚≤&WfVÁEˆñB"¬'Fñ÷W7F◊˜WF2'––¢––¢f˜"WfVÁBñ‚7BÁ6W76ñˆÂ˜7FFRÊVFóBÊWfVÁG0–¢“¿–¢––¢&ˆ6W76ñÊuˆ6ˆÊfñuˆ∂Wí“f«VU˜6Ü#Sbá&ˆ6W76ñÊuˆ6ˆÊfñrê–¢ñb'&ˆ6W76ñÊu˜&˜fVÊÊ6R"Ê˜Bñ‚7BÁ6W76ñˆÂ˜7FFS†–¢7BÁ6W76ñˆÂ˜7FFRÁ&ˆ6W76ñÊu˜&˜fVÊÊ6R“∑––¢ñb&ˆ6W76ñÊuˆ6ˆÊfñuˆ∂WíÊ˜Bñ‚7BÁ6W76ñˆÂ˜7FFRÁ&ˆ6W76ñÊu˜&˜fVÊÊ6S†–¢7BÁ6W76ñˆÂ˜7FFRÁ&ˆ6W76ñÊu˜&˜fVÊÊ6U∑&ˆ6W76ñÊuˆ6ˆÊfñuˆ∂Wï““'Vñ∆E˜&˜fVÊÊ6RÄ–¢ñÁWE˜6˜W&6S÷ñÁWEˆ6ˆÁFWáE≤'6˜W&6Uˆfñ∆Uˆ'óFW2%“¿–¢÷WFFF˜6˜W&6S÷ñÁWEˆ6ˆÁFWáE≤&÷WFFFˆfñ∆Uˆ'óFW2%“¿–¢6ˆÊfñs◊&ˆ6W76ñÊuˆ6ˆÊfñr¿–¢&ˆ¶V7E˜&ˆ˜C‘$4UÙDï"¿–¢ê–¢&ˆ6W76ñÊu˜&˜fVÊÊ6R“7BÁ6W76ñˆÂ˜7FFRÁ&ˆ6W76ñÊu˜&˜fVÊÊ6U∑&ˆ6W76ñÊuˆ6ˆÊfñuˆ∂Wï––¢&W˜'E˜&W&VB“fñ«FW&VBÊ6˜íÜFVW‘f«6Rê–¢&W˜'E˜&W&VBÊGG'5≤&ñÊFñ6F˜%˜&ˆ6W76ñÊuˆVFóB%““Ä–¢6V∆V7FVEˆñÊFñ6F˜%ˆVFóBÁFıˆFñ7BÜ˜&ñVÁC“'&V6˜&G2"ê–¢ê–¢&W˜'E˜&W&VBÊGG'5≤&ñÊFñ6F˜%˜&ˆ6W76ñÊuˆWfVÁG2%““Ä–¢6V∆V7FVEˆñÊFñ6F˜%ˆWfVÁG2ÁFıˆFñ7BÜ˜&ñVÁC“'&V6˜&G2"ê–¢ê–¢&W˜'E˜&W&VBÊGG'5≤&ñÊFñ6F˜%ˆ6∆ñ'&FñˆÂ˜&÷WFW'2%““Ä–¢6V∆V7FVEˆñÊFñ6F˜%˜77˜'G2ÁFıˆFñ7BÜ˜&ñVÁC“'&V6˜&G2"ê–¢ê–¢&W˜'B“'Vñ∆Eˆ÷&∂F˜vÂ˜&W˜'BÄ–¢÷WFFF÷÷WFFF¿–¢&W&VC◊&W˜'E˜&W&VB¿–¢f∆ñFFñˆÂˆó77VW3÷∆≈ˆó77VW2¿–¢fñ«W&W3÷fñ«W&W5∂fñ«W&W5≤'FW7EˆñB%“Êó6ñ‚á6V∆V7FVE˜FW7G2ï“¿–¢7%˜&W7V«G3◊7%ˆ'ï˜FW7B¿–¢÷ˆGV∆ì◊&W˜'Eˆ÷ˆGV∆í¿–¢fñwW&Uˆ6Fñˆ„÷7W'&VÁEˆ6Fñˆ‚¿–¢∆˜E˜v&ÊñÊw3÷7W'&VÁE˜v&ÊñÊw2¿–¢VFóC◊7BÁ6W76ñˆÂ˜7FFRÊVFóB¿–¢&˜fVÊÊ6S◊&ˆ6W76ñÊu˜&˜fVÊÊ6R¿–¢77˜'E˜7FGW3◊77˜'Eˆ6ˆ◊∆WFVÊW72Ü÷WFFF¬6V∆V7FVE˜FW7G2í¿–¢ñ◊˜'EˆñÊfÛ÷ñ◊˜'EˆñÊfÚ¿–¢6˜W&6U˜FW7EˆñG3◊&u≤'FW7EˆñB%“ÊG&˜ÊÇíÊ7GóRá7G"íÁVÊóVRÇíÁFˆ∆ó7BÇí¿–¢6˜W&6U˜&˜uˆ6˜VÁC÷∆V‚á&rí¿–¢ê–¢7BÁ7V&ÜVFW"Ç-	Ì-}""ê–¢7BÊ÷&∂F˜v‚á&W˜'Bê–¢7BÊF˜vÊ∆ˆEˆ'WGFˆ‚Ç-
-≠}-¬Ì-}"÷&∂F˜v‚"¬&W˜'BÊVÊ6ˆFRÇ'WFb”Ç"í¬'6ˆñ≈˜7F◊˜&W˜'E˜'RÊ÷B"¬'FWáBˆ÷&∂F˜v‚"ê–†–¢&W7V«E˜F&∆W2“∞–¢&fñ«W&U˜7V÷÷'í#¢fñ«W&W5∂fñ«W&W5≤'FW7EˆñB%“Êó6ñ‚á6V∆V7FVE˜FW7G2ï“¿–¢&VFóB#¢7BÁ6W76ñˆÂ˜7FFRÊVFóBÁFıˆg&÷RÇí¿–¢'7"#¢∂∂Wì¢f«VRÁFıˆFñ7BÇíf˜"∂Wí¬f«VRñ‚7%ˆ'ï˜FW7BÊóFV◊2Çó“¿–¢&FW&ófFófW2#¢FW&ófFófW2¿–¢'6WGF∆V÷VÁEˆE˜F&vWE˜&W77W&R#¢6WGF∆V÷VÁEˆE˜F&vWB¿–¢'&W77W&UˆE˜F&vWE˜6WGF∆V÷VÁB#¢&W77W&UˆE˜F&vWB¿–¢&FVf˜&÷FñˆÂ˜v˜&≤#¢v˜&µ˜F&∆R¿–¢&áó7FW&W6ó2#¢áó7FW&W6ó2¿–¢'7F&ñ∆ó¶Fñˆ‚#¢7F&ñ∆ó¶Fñˆ‚¿–¢&6VÁFW%ˆÊE˜Fñ«B#¢Fñ«B¿–¢'f∆ñFFñˆÂˆó77VW2#¢∂óFV“ÁFıˆFñ7BÇíf˜"óFV“ñ‚∆≈ˆó77VW5“¿–¢'&˜fVÊÊ6R#¢&ˆ6W76ñÊu˜&˜fVÊÊ6RÁFıˆFñ7BÇí¿–¢&6ˆÁfW'6ñˆÂ˜&÷WFW'2#¢B‰FFg&÷RÄ–¢VffV7FófUˆ6ˆÁfW'6ñˆÂ˜&÷WFW'2Ü÷WFFF¬6V∆V7FVE˜FW7G2ê–¢í¿–¢&ñÊFñ6F˜%˜&ˆ6W76ñÊuˆVFóB#¢6V∆V7FVEˆñÊFñ6F˜%ˆVFóB¿–¢&ñÊFñ6F˜%˜&ˆ6W76ñÊuˆWfVÁG2#¢6V∆V7FVEˆñÊFñ6F˜%ˆWfVÁG2¿–¢&ñÊFñ6F˜%ˆ6∆ñ'&FñˆÂ˜&÷WFW'2#¢6V∆V7FVEˆñÊFñ6F˜%˜77˜'G2¿–¢––¢÷ÁV≈ˆG&gE˜ñ∆ˆB“ñÁWEˆ6ˆÁFWáBÊvWBÇ&÷ÁV≈ˆG&gB"ê–¢ñbó6ñÁ7FÊ6RÜ÷ÁV≈ˆG&gE˜ñ∆ˆB¬Fñ7Bì†–¢&W7V«E˜F&∆W5≤&÷ÁV≈˜&ñ÷'ï˜&˜w2%““B‰FFg&÷RÄ–¢÷ÁV≈ˆG&gE˜ñ∆ˆBÊvWBÇ'&˜w2"í˜"µ––¢ê–¢&W7V«E˜F&∆W5≤&÷ÁV≈ˆVÁG'ïˆVFóB%““B‰FFg&÷RÄ–¢ñÁWEˆ6ˆÁFWáBÊvWBÇ&÷ÁV≈ˆVFóEˆWfVÁG2"í˜"µ––¢ê–¢&W7V«E˜F&∆W5≤&÷ÁV≈ˆG&gEˆ÷ÊñfW7B%““∞–¢'66ÜV÷˜fW'6ñˆ‚#¢÷ÁV≈ˆG&gE˜ñ∆ˆBÊvWBÇ'66ÜV÷˜fW'6ñˆ‚"í¿–¢&G&gEˆñB#¢÷ÁV≈ˆG&gE˜ñ∆ˆBÊvWBÇ&G&gEˆñB"í¿–¢&G&gE˜6Ü#Sb#¢ñÁWEˆ6ˆÁFWáBÊvWBÇ&÷ÁV≈ˆG&gE˜6Ü#Sb"í¿–¢'6˜W&6U˜GóR#¢&÷ÁV¬"¿–¢––¢Ê«ó6ó5ˆ÷ÊñfW7B“∑––¢f˜"Ê÷R¬F&∆Rñ‚7BÁ6W76ñˆÂ˜7FFRÊÊ«ó6ó5˜F&∆W2ÊóFV◊2Çì†–¢7V2“F&∆RÊGG'2ÊvWBÇ&Ê«ó6ó5˜7V2"¬∑“íñbó6ñÁ7FÊ6RáF&∆R¬B‰FFg&÷RíV«6R∑––¢ñbÊ«ó6ó5˜F&∆UˆñÂ˜66˜RÜÊ÷R¬F&∆Rì†¢6fUˆÊ÷R“Ü6Ü∆ñ"Á6ÜÜÊ÷RÊVÊ6ˆFRÇííÊÜWÜFñvW7BÇï≥£––¢&W7V«E˜F&∆W5∂b&Ê«ó6ó5˜∑6fUˆÊ÷W“%““F&∆P–¢Ê«ó6ó5ˆ÷ÊñfW7E∂b&Ê«ó6ó5˜∑6fUˆÊ÷W“%““7V0–¢&W7V«E˜F&∆W5≤&Ê«ó6ó5ˆ÷ÊñfW7B%““Ê«ó6ó5ˆ÷ÊñfW7@–¢'VÊF∆U˜7V2“∞–¢&FF6WB#¢FF6WEˆ∂Wí¿–¢'&Wfó6ñˆ‚#¢7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆ‚¿–¢&6˜'&V7FñˆÂˆ÷ˆFR#¢6˜'&V7FñˆÂˆ÷ˆFR¿–¢'FW7G2#¢6V∆V7FVE˜FW7G2¿–¢&6Fñˆ‚#¢7W'&VÁEˆ6Fñˆ‚¿–¢&w&Ç#¢∆ˆ6«2ÇíÊvWBÇ&Wá˜'E˜7V2"í¿–¢'7"#¢∂∂Wì¢f«VRÁFıˆFñ7BÇíf˜"∂Wí¬f«VRñ‚7%ˆ'ï˜FW7BÊóFV◊2Çó“¿–¢&Ê«ó6ó5ˆ÷ÊñfW7B#¢Ê«ó6ó5ˆ÷ÊñfW7B¿–¢'F&vWE˜&W77W&Uˆµ#¢f∆ˆBáF&vWE˜í¿–¢'F&vWE˜6WGF∆V÷VÁEˆ÷“#¢f∆ˆBáF&vWE˜2í¿–¢'7F&ñ∆ó¶FñˆÂ˜&FUˆ÷’ˆ÷ñ‚#¢f∆ˆBá&FRí¿–¢&VFóEˆWfVÁG2#¢∆V‚á7BÁ6W76ñˆÂ˜7FFRÊVFóBÊWfVÁG2í¿–¢'&˜fVÊÊ6Uˆ6ˆÊfñu˜6Ü#Sb#¢&ˆ6W76ñÊu˜&˜fVÊÊ6RÊ6ˆÊfñu˜6Ü#Sb¿–¢––¢'VÊF∆Uˆ∂Wí“Ü6Ü∆ñ"Á6ÜÄ–¢ß6ˆ‚ÊGV◊2Ü'VÊF∆U˜7V2¬6˜'Eˆ∂Wó3’G'VR¬FVfV«C◊7G"íÊVÊ6ˆFRÇ'WFb”Ç"ê–¢íÊÜWÜFñvW7BÇê–¢ñb7BÊ'WGFˆ‚Ç-
-Ì-¬˝≠]"-Ì˝Ìç}-ÌMçÕÌ-Ç"¬∂Wì“'&W&Uˆ'VÊF∆R"¬GóS“'&ñ÷'í"ì†–¢vóFÇ7BÁ7ñÊÊW"Ç-
-MÌÕçÌ-›çR§ïM››ΩÕÇ¬]}=ΩÕ--ÕÇÇç=›≠Õé(
-b"ì†–¢fñwW&U˜ñ∆ˆG2“∑––¢ñb'∆˜Eˆ˜WGWB"ñ‚∆ˆ6«2ÇíÊB∆˜Eˆ˜WGWBó2Ê˜BÊˆÊS†–¢w&ÖˆWá˜'G2“7BÁ6W76ñˆÂ˜7FFRÊfñwW&UˆWá˜'G2ÊvWBÄ–¢∆ˆ6«2ÇíÊvWBÇ&Wá˜'Eˆ∂Wí"¬""í¬∑––¢ê–¢ñbÊ˜Bw&ÖˆWá˜'G3†–¢w&ÖˆWá˜'G2“∞–¢'7fr#¢Wá˜'EˆfñwW&Rá∆˜Eˆ˜WGWBÊfñwW&R¬'7fr"í¿–¢'Fb#¢Wá˜'EˆfñwW&Rá∆˜Eˆ˜WGWBÊfñwW&R¬'Fb"í¿–¢'Êr#¢Wá˜'EˆfñwW&Rá∆˜Eˆ˜WGWBÊfñwW&R¬'Êr"í¿–¢––¢fñwW&U˜ñ∆ˆG2“∞–¢&7W'&VÁBÁ7fr#¢w&ÖˆWá˜'G5≤'7fr%“¿–¢&7W'&VÁBÁFb#¢w&ÖˆWá˜'G5≤'Fb%“¿–¢&7W'&VÁEÛcGíÁÊr#¢w&ÖˆWá˜'G5≤'Êr%“¿–¢––¢7BÁ6W76ñˆÂ˜7FFRÊ'VÊF∆Uˆ66ÜU∂'VÊF∆Uˆ∂Wï““&W&ˆGV6ñ&ñ∆óGïˆ'VÊF∆RÄ–¢&s◊&r¿–¢&W&VC÷fñ«FW&VB¿–¢÷WFFF÷÷WFFF¿–¢VFóC◊7BÁ6W76ñˆÂ˜7FFRÊVFóB¿–¢&W˜'Eˆ÷&∂F˜v„◊&W˜'B¿–¢&W7V«E˜F&∆W3◊&W7V«E˜F&∆W2¿–¢fñwW&W3÷fñwW&U˜ñ∆ˆG2¿–¢'VÂ˜&÷WFW'3◊∞–¢&FF6WE˜6Ü#Sb#¢FF6WEˆ∂Wí¿–¢'&Wfó6ñˆ‚#¢7BÁ6W76ñˆÂ˜7FFRÁ&Wfó6ñˆ‚¿–¢&6˜'&V7FñˆÂˆ÷ˆFR#¢6˜'&V7FñˆÂˆ÷ˆFR¿–¢'6V∆V7FVE˜FW7G2#¢6V∆V7FVE˜FW7G2¿–¢&w&Ç#¢∆ˆ6«2ÇíÊvWBÇ&Wá˜'E˜7V2"í¿–¢'7"#¢∂∂Wì¢f«VRÁFıˆFñ7BÇíf˜"∂Wí¬f«VRñ‚7%ˆ'ï˜FW7BÊóFV◊2Çó“¿–¢&Ê«ó6ó5ˆ÷ÊñfW7B#¢Ê«ó6ó5ˆ÷ÊñfW7B¿–¢'F&vWE˜&W77W&Uˆµ#¢f∆ˆBáF&vWE˜í¿–¢'F&vWE˜6WGF∆V÷VÁEˆ÷“#¢f∆ˆBáF&vWE˜2í¿–¢'7F&ñ∆ó¶FñˆÂ˜&FUˆ÷’ˆ÷ñ‚#¢f∆ˆBá&FRí¿–¢“¿–¢&˜fVÊÊ6S◊&ˆ6W76ñÊu˜&˜fVÊÊ6R¿–¢&uˆ6V∆«3÷ñÁWEˆ6ˆÁFWáE≤'&uˆ6V∆«2%“¿–¢ñ◊˜'Eˆó77VW3÷∆≈ˆó77VW2¿–¢6˜W&6Uˆfñ∆UˆÊ÷S÷ñÁWEˆ6ˆÁFWáE≤'6˜W&6Uˆfñ∆UˆÊ÷R%“¿–¢6˜W&6Uˆfñ∆Uˆ'óFW3÷ñÁWEˆ6ˆÁFWáE≤'6˜W&6Uˆfñ∆Uˆ'óFW2%“¿–¢÷WFFFˆfñ∆UˆÊ÷S÷ñÁWEˆ6ˆÁFWáE≤&÷WFFFˆfñ∆UˆÊ÷R%“¿–¢÷WFFFˆfñ∆Uˆ'óFW3÷ñÁWEˆ6ˆÁFWáE≤&÷WFFFˆfñ∆Uˆ'óFW2%“¿–¢6ˆÊfñu˜6Ê6Ü˜C◊&ˆ6W76ñÊuˆ6ˆÊfñr¿–¢66˜S◊∞–¢'6˜W&6U˜FW7EˆñG2#¢&u≤'FW7EˆñB%“ÊG&˜ÊÇíÊ7GóRá7G"íÁVÊóVRÇíÁFˆ∆ó7BÇí¿–¢'6V∆V7FVE˜FW7EˆñG2#¢6˜'FVBá6V∆V7FVE˜FW7G2í¿–¢&WÜ6«VFVE˜FW7EˆñG2#¢6˜'FVBá6WBá&u≤'FW7EˆñB%“ÊG&˜ÊÇíÊ7GóRá7G"íí“6WBá6V∆V7FVE˜FW7G2íí¿–¢'6˜W&6U˜&˜w2#¢∆V‚á&rí¿–¢'&W&VE˜&˜w2#¢∆V‚Üfñ«FW&VBí¿–¢“¿–¢ê–¢66ÜVEˆ'VÊF∆R“7BÁ6W76ñˆÂ˜7FFRÊ'VÊF∆Uˆ66ÜRÊvWBÜ'VÊF∆Uˆ∂Wíê–¢ñb66ÜVEˆ'VÊF∆S†–¢7BÊF˜vÊ∆ˆEˆ'WGFˆ‚Ä–¢-
-≠}-¬˝≠]"-Ì˝Ìç}-ÌMçÕÌ-Ç§ï"¿–¢66ÜVEˆ'VÊF∆R¿–¢'6ˆñ≈˜7F◊˜&W&ˆGV6ñ&ñ∆óGíÁ¶ó"¿–¢&∆ñ6Fñˆ‚˜¶ó"¿–¢ê–¢7BÁ7V&ÜVFW"Ç$VFóBG&ñ¬"ê–¢VFóEˆg&÷R“7BÁ6W76ñˆÂ˜7FFRÊVFóBÁFıˆg&÷RÇê–¢ñbVFóEˆg&÷RÊV◊Gì†–¢7BÊñÊfÚÇ-
-=}›ΩR]ç]›çí˝Ì≠›]"‚"ê–¢V«6S†–¢7BÊFFg&÷RÜVFóEˆg&÷R¬vñGFÉ“'7G&WF6Ç"¬ÜñFUˆñÊFWÉ’G'VRê–¢7BÊF˜vÊ∆ˆEˆ'WGFˆ‚Ä–¢-
-≠}-¬VFóB•4Ù‚"¿–¢7BÁ6W76ñˆÂ˜7FFRÊVFóBÁFıˆß6ˆ‚ÇíÊVÊ6ˆFRÇ'WFb”Ç"í¿–¢&VFóBÊß6ˆ‚"¿–¢&∆ñ6Fñˆ‚ˆß6ˆ‚"¿–¢ê–†–¶ñb'∆˜Eˆ˜WGWB"ñ‚∆ˆ6«2ÇíÊB∆˜Eˆ˜WGWBó2Ê˜BÊˆÊS†–¢«BÊ6∆˜6Rá∆˜Eˆ˜WGWBÊfñwW&Rê–
+                "–ù–µ–∏–∑–≤–µ—Å—Ç–Ω–∞—è —Å—Ö–µ–º–∞ –±–ª–æ–∫–∏—Ä—É–µ—Ç —Ä–∞—Å—á—ë—Ç",
+                "–Ø–≤–Ω–æ–µ —Å–æ—Ö—Ä–∞–Ω—ë–Ω–Ω–æ–µ —Å–æ–ø–æ—Å—Ç–∞–≤–ª–µ–Ω–∏–µ",
+                "Legacy-—Å–æ–≤–º–µ—Å—Ç–∏–º–æ—Å—Ç—å —Å –ø—Ä–µ–¥—É–ø—Ä–µ–∂–¥–µ–Ω–∏–µ–º",
+            ],
+        )
+        try:
+            schema = inspect_excel_schema(protocol_bytes)
+        except Exception as exc:
+            return schema_failure_context(exc)
+        sheet_names = [item["sheet_name"] for item in schema["sheets"]]
+        if import_mode == "interactive":
+            sheet_scope = "–û–¥–∏–Ω –ª–∏—Å—Ç"
+        else:
+            sheet_scope = st.sidebar.radio(
+                "–û–±–ª–∞—Å—Ç—å –ª–∏—Å—Ç–æ–≤ Excel",
+                ["–í—Å–µ –ª–∏—Å—Ç—ã", "–û–¥–∏–Ω –ª–∏—Å—Ç"],
+                captions=[
+                    "–ü–æ —É–º–æ–ª—á–∞–Ω–∏—é: –ø—Ä–æ–≤–µ—Ä—è—é—Ç—Å—è –º–µ–∂–ª–∏—Å—Ç–æ–≤—ã–µ ID –∏ —Å—Ö–µ–º—ã",
+                    "–Ø–≤–Ω–æ –æ–≥—Ä–∞–Ω–∏—á–∏—Ç—å –∏–º–ø–æ—Ä—Ç –æ–¥–Ω–∏–º –ª–∏—Å—Ç–æ–º",
+                ],
+            )
+        selected_schema = None
+        if sheet_scope == "–û–¥–∏–Ω –ª–∏—Å—Ç":
+            selected_sheet = st.sidebar.selectbox("–õ–∏—Å—Ç Excel", sheet_names)
+            selected_schema = next(
+                item for item in schema["sheets"] if item["sheet_name"] == selected_sheet
+            )
+            suggested_row = selected_schema.get("header_row")
+            selected_header_row = int(
+                st.sidebar.number_input(
+                    "–°—Ç—Ä–æ–∫–∞ –∑–∞–≥–æ–ª–æ–≤–∫–æ–≤ (1-based)",
+                    min_value=1,
+                    max_value=200_000,
+                    value=int(suggested_row or 1),
+                    step=1,
+                    key=f"header_row_{file_key}_{selected_sheet}",
+                )
+            )
+            try:
+                selected_schema = inspect_excel_schema(
+                    protocol_bytes,
+                    sheet_name=selected_sheet,
+                    header_row=selected_header_row,
+                )["sheets"][0]
+            except Exception as exc:
+                return schema_failure_context(exc)
+            partial_sheet_scope = import_mode != "interactive"
+        else:
+            st.sidebar.caption(
+                "–ë—É–¥—É—Ç –∏–º–ø–æ—Ä—Ç–∏—Ä–æ–≤–∞–Ω—ã –≤—Å–µ —Ä–∞—Å–ø–æ–∑–Ω–∞–Ω–Ω—ã–µ –ª–∏—Å—Ç—ã; —Å–ª—É–∂–µ–±–Ω—ã–µ –ª–∏—Å—Ç—ã —Ñ–∏–∫—Å–∏—Ä—É—é—Ç—Å—è –≤ QC."
+            )
+        if import_mode == "interactive":
+            mapping_file = st.sidebar.file_uploader(
+                "–°–æ—Ö—Ä–∞–Ω—ë–Ω–Ω—ã–π mapping JSON (–Ω–µ–æ–±—è–∑–∞—Ç–µ–ª—å–Ω–æ)",
+                type=["json"],
+                key=f"mapping_file_{file_key}_{selected_sheet}_{selected_header_row}",
+            )
+            saved_mapping = {}
+            mapping_file_sha256 = None
+            if mapping_file is not None:
+                mapping_bytes = mapping_file.getvalue()
+                saved_mapping = json.loads(mapping_bytes.decode("utf-8-sig"))
+                if not isinstance(saved_mapping, dict):
+                    raise ValueError("Mapping JSON –¥–æ–ª–∂–µ–Ω –±—ã—Ç—å –æ–±—ä–µ–∫—Ç–æ–º.")
+                mapping_file_sha256 = hashlib.sha256(mapping_bytes).hexdigest()
+            mapping_state_key = provenance_key(
+                json.dumps(
+                    {
+                        "input_file_sha256": hashlib.sha256(protocol_bytes).hexdigest(),
+                        "sheet_name": selected_sheet,
+                        "header_row": selected_header_row,
+                        "mapping_file_sha256": mapping_file_sha256,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+            )
+            header_items = selected_schema.get("headers", [])
+            displays = ["‚Äî"] + [f"{item['column']}: {item['value']}" for item in header_items]
+            display_to_column = {
+                f"{item['column']}: {item['value']}": item["column"] for item in header_items
+            }
+            suggested = selected_schema.get("suggested_mapping", {})
+            field_labels = {
+                "test_id": "ID –∏—Å–ø—ã—Ç–∞–Ω–∏—è *",
+                "stage": "–°—Ç—É–ø–µ–Ω—å *",
+                "load": "–ù–∞–≥—Ä—É–∑–∫–∞/–¥–∞–≤–ª–µ–Ω–∏–µ *",
+                "settlement": "–û—Å–∞–¥–∫–∞",
+                "indicator_1": "–ò–Ω–¥–∏–∫–∞—Ç–æ—Ä 1",
+                "indicator_2": "–ò–Ω–¥–∏–∫–∞—Ç–æ—Ä 2",
+                "indicator_3": "–ò–Ω–¥–∏–∫–∞—Ç–æ—Ä 3",
+                "indicator_4": "–ò–Ω–¥–∏–∫–∞—Ç–æ—Ä 4",
+                "reference_indicator": "–û–ø–æ—Ä–Ω—ã–π –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä",
+                "horizontal_indicator": "–ì–æ—Ä–∏–∑–æ–Ω—Ç–∞–ª—å–Ω—ã–π –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä",
+                "branch": "–í–µ—Ç–≤—å",
+                "timestamp": "–í—Ä–µ–º—è",
+                "status": "–°—Ç–∞—Ç—É—Å",
+                "comment": "–ö–æ–º–º–µ–Ω—Ç–∞—Ä–∏–π",
+                "group": "–ì—Ä—É–ø–ø–∞",
+                "pair_id": "ID –ø–∞—Ä—ã",
+            }
+            available_columns = {item["column"] for item in header_items}
+            column_mapping = dict(saved_mapping)
+            with st.sidebar.expander("–°–æ–ø–æ—Å—Ç–∞–≤–ª–µ–Ω–∏–µ —Å—Ç–æ–ª–±—Ü–æ–≤", expanded=True):
+                for field, label in field_labels.items():
+                    saved_selector = saved_mapping.get(field)
+                    saved_column = None
+                    if saved_selector is not None:
+                        selector_text = str(saved_selector).strip()
+                        if selector_text.upper() in available_columns:
+                            saved_column = selector_text.upper()
+                        else:
+                            saved_column = next(
+                                (
+                                    item["column"]
+                                    for item in header_items
+                                    if str(item["value"]).strip() == selector_text
+                                ),
+                                None,
+                            )
+                    suggested_column = saved_column or suggested.get(field)
+                    default_display = next(
+                        (name for name, column in display_to_column.items() if column == suggested_column),
+                        "‚Äî",
+                    )
+                    selected = st.selectbox(
+                        label,
+                        displays,
+                        index=displays.index(default_display),
+                        key=f"mapping_{field}_{mapping_state_key}",
+                    )
+                    if selected != "‚Äî":
+                        column_mapping[field] = display_to_column[selected]
+                    else:
+                        column_mapping.pop(field, None)
+            st.sidebar.download_button(
+                "–°–∫–∞—á–∞—Ç—å mapping JSON",
+                json.dumps(column_mapping, ensure_ascii=False, indent=2).encode("utf-8"),
+                "excel_column_mapping.json",
+                "application/json",
+            )
+            mapping_context = {
+                "input_file_sha256": hashlib.sha256(protocol_bytes).hexdigest(),
+                "sheet_name": selected_sheet,
+                "header_row": selected_header_row,
+                "column_mapping": column_mapping,
+            }
+            mapping_signature = provenance_key(
+                json.dumps(mapping_context, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            )
+            preview_imported = read_protocol(
+                protocol_bytes,
+                filename=protocol_file.name,
+                import_mode="interactive",
+                column_mapping=column_mapping,
+                sheet_name=selected_sheet,
+                header_row=selected_header_row,
+            )
+            st.subheader("–ü—Ä–µ–¥–ø—Ä–æ—Å–º–æ—Ç—Ä —Å–æ–ø–æ—Å—Ç–∞–≤–ª–µ–Ω–∏—è Excel")
+            st.caption(
+                f"–õ–∏—Å—Ç: {selected_sheet}; —Å—Ç—Ä–æ–∫–∞ –∑–∞–≥–æ–ª–æ–≤–∫–æ–≤: {selected_header_row}; "
+                f"–ø–æ–¥–ø–∏—Å—å mapping: {mapping_signature}"
+            )
+            if preview_imported.frame.empty:
+                st.warning("–ü–æ —Ç–µ–∫—É—â–µ–º—É mapping –Ω–µ —Ä–∞—Å–ø–æ–∑–Ω–∞–Ω–æ –Ω–∏ –æ–¥–Ω–æ–π —Å—Ç—Ä–æ–∫–∏ –ø—Ä–æ—Ç–æ–∫–æ–ª–∞.")
+            else:
+                preview_columns = [
+                    column
+                    for column in (
+                        "sheet_name",
+                        "source_row",
+                        "source_columns",
+                        "test_id",
+                        "stage",
+                        "load",
+                        "settlement",
+                        "indicator_1",
+                        "indicator_2",
+                        "indicator_3",
+                        "indicator_4",
+                        "reference_indicator",
+                        "raw_stage",
+                        "raw_load",
+                        "parsed_stage",
+                        "parsed_load",
+                        "status",
+                    )
+                    if column in preview_imported.frame.columns
+                ]
+                st.dataframe(
+                    _display_safe_frame(preview_imported.frame[preview_columns].head(10)),
+                    width="stretch",
+                    hide_index=True,
+                )
+            if preview_imported.issues:
+                with st.expander("–î–∏–∞–≥–Ω–æ—Å—Ç–∏–∫–∞ –ø—Ä–µ–¥–ø—Ä–æ—Å–º–æ—Ç—Ä–∞", expanded=True):
+                    st.dataframe(
+                        _display_safe_frame(_issue_frame(preview_imported.issues)),
+                        width="stretch",
+                        hide_index=True,
+                    )
+            if len(preview_imported.raw_cells):
+                with st.expander("–ò—Å—Ö–æ–¥–Ω—ã–µ –∫–æ–æ—Ä–¥–∏–Ω–∞—Ç—ã —è—á–µ–µ–∫ –ø—Ä–µ–¥–ø—Ä–æ—Å–º–æ—Ç—Ä–∞"):
+                    st.dataframe(
+                        _display_safe_frame(preview_imported.raw_cells.head(50)),
+                        width="stretch",
+                        hide_index=True,
+                    )
+            mapping_confirmed = st.sidebar.checkbox(
+                "–ü–æ–¥—Ç–≤–µ—Ä–∂–¥–∞—é —Å–æ–ø–æ—Å—Ç–∞–≤–ª–µ–Ω–∏–µ —Å—Ç–æ–ª–±—Ü–æ–≤",
+                key=f"confirm_mapping_{mapping_signature}",
+            )
+            if not mapping_confirmed:
+                st.info("–ü—Ä–æ–≤–µ—Ä—å—Ç–µ –ø—Ä–µ–¥–ø—Ä–æ—Å–º–æ—Ç—Ä –∏ —è–≤–Ω–æ –ø–æ–¥—Ç–≤–µ—Ä–¥–∏—Ç–µ mapping –ø–µ—Ä–µ–¥ —Ä–∞—Å—á—ë—Ç–æ–º.")
+                st.stop()
+
+    config = {
+        "import_mode": import_mode,
+        "sheet_scope": (
+            "single_confirmed"
+            if import_mode == "interactive"
+            else "single_explicit" if partial_sheet_scope else "all"
+        ),
+        "sheet_name": selected_sheet,
+        "header_row": selected_header_row,
+        "column_mapping": column_mapping,
+    }
+    imported = (
+        preview_imported
+        if preview_imported is not None
+        else read_protocol(
+            protocol_bytes,
+            filename=protocol_file.name,
+            import_mode=import_mode,
+            column_mapping=column_mapping,
+            sheet_name=selected_sheet,
+            header_row=selected_header_row,
+        )
+    )
+    if partial_sheet_scope:
+        imported.issues.append(
+            ValidationIssue(
+                "warning",
+                "partial_excel_sheet_scope",
+                f"–ò–º–ø–æ—Ä—Ç —è–≤–Ω–æ –æ–≥—Ä–∞–Ω–∏—á–µ–Ω –ª–∏—Å—Ç–æ–º {selected_sheet!r}; –æ—Å—Ç–∞–ª—å–Ω—ã–µ –ª–∏—Å—Ç—ã –Ω–µ –≤—Ö–æ–¥—è—Ç –≤ –∞–Ω–∞–ª–∏–∑.",
+                sheet=selected_sheet,
+                suggested_action="–î–ª—è –ø–æ–ª–Ω–æ–≥–æ –ø—Ä–æ–µ–∫—Ç–∞ –≤—ã–±–µ—Ä–∏—Ç–µ –æ–±–ª–∞—Å—Ç—å ¬´–í—Å–µ –ª–∏—Å—Ç—ã¬ª.",
+            )
+        )
+        imported.info["partial_sheet_scope"] = True
+    imported.info["blocking_issue_count"] = sum(
+        bool(item.blocks_processing) for item in imported.issues
+    )
+    return uploaded_context(imported, config)
+
+
+def _apply_overrides(prepared: pd.DataFrame, active_mode: str) -> pd.DataFrame:
+    result = prepared.copy(deep=True)
+    for item in st.session_state.get("manual_overrides", []):
+        if item.get("base_mode") != active_mode:
+            continue
+        mask = (result["test_id"].astype(str) == item["test_id"]) & (
+            result["sequence_no"] == item["sequence_no"]
+        )
+        result.loc[mask, "settlement_mm"] = item["value_mm"]
+        result.loc[mask, "manual_override"] = True
+    if "manual_override" not in result:
+        result["manual_override"] = False
+    result["manual_override"] = result["manual_override"].fillna(False).astype(bool)
+    return result
+try:
+    input_context = _load_inputs()
+    raw = input_context["raw"]
+    metadata = input_context["metadata"]
+    import_info = input_context["import_info"]
+    metadata_issues = validate_project_metadata(
+        metadata,
+        strict=import_info.get("import_mode", "strict") in {"strict", "interactive"},
+    )
+    consistency_issues = validate_import_metadata_consistency(
+        raw,
+        metadata,
+        import_info,
+        strict=import_info.get("import_mode", "strict") in {"strict", "interactive"},
+    )
+    import_issues = [*input_context["import_issues"], *metadata_issues, *consistency_issues]
+except Exception as exc:
+    st.error(f"–ù–µ —É–¥–∞–ª–æ—Å—å –ø—Ä–æ—á–∏—Ç–∞—Ç—å –¥–∞–Ω–Ω—ã–µ: {exc}")
+    st.stop()
+
+import_blocking = [item for item in import_issues if bool(item.blocks_processing)]
+if import_blocking:
+    st.title(f"Soil Stamp Antonov {VERSION}")
+    st.error("–°—Ö–µ–º–∞ –∏–º–ø–æ—Ä—Ç–∞ —Å–æ–¥–µ—Ä–∂–∏—Ç –±–ª–æ–∫–∏—Ä—É—é—â–∏–µ –æ—à–∏–±–∫–∏. –ò—Å–ø—Ä–∞–≤—å—Ç–µ mapping –∏–ª–∏ –≤—ã–±–µ—Ä–∏—Ç–µ –¥—Ä—É–≥–æ–π —Ä–µ–∂–∏–º.")
+    _render_blocking_diagnostics(input_context, import_issues, key_prefix="import_blocking")
+    st.stop()
+
+dataset_key = hashlib.sha256(
+    (
+        _dataset_hash(raw, metadata)
+        + input_context["provenance"].input_file_sha256
+        + input_context["provenance"].metadata_sha256
+        + input_context["provenance"].config_sha256
+    ).encode("utf-8")
+).hexdigest()
+if st.session_state.get("dataset_key") != dataset_key:
+    _reset_for_dataset(dataset_key, raw, input_context)
+else:
+    input_context["provenance"] = st.session_state.get(
+        "dataset_provenance", input_context["provenance"]
+    )
+    st.session_state.dataset_provenance = input_context["provenance"]
+
+try:
+    base_prepared, validation_issues = prepare_measurements(
+        raw, metadata, strict_metadata=False
+    )
+    indicator_processing_audit = indicator_audit_frame(base_prepared)
+    indicator_processing_events = indicator_event_frame(base_prepared)
+    indicator_calibration_parameters = indicator_passport_frame(base_prepared)
+    # Pandas deep-copies attrs through most analysis operations.  Keep the
+    # sizeable indicator artefacts in dedicated frames and use an attrs-free
+    # working layer; they are reattached only to the report snapshot below.
+    base_prepared.attrs.clear()
+except Exception as exc:
+    st.title(f"Soil Stamp Antonov {VERSION}")
+    st.error(f"Metadata –∏–ª–∏ –∫–∞–ª–∏–±—Ä–æ–≤–∫–∞ –Ω–µ–∫–æ—Ä—Ä–µ–∫—Ç–Ω—ã: {exc}")
+    runtime_issue = ValidationIssue(
+        "error",
+        "processing_exception",
+        f"–ü–æ–¥–≥–æ—Ç–æ–≤–∫–∞ –∏–∑–º–µ—Ä–µ–Ω–∏–π –∑–∞–≤–µ—Ä—à–∏–ª–∞—Å—å –∏—Å–∫–ª—é—á–µ–Ω–∏–µ–º: {exc}",
+        raw_value=str(exc),
+        suggested_action="–°–∫–∞—á–∞–π—Ç–µ –¥–∏–∞–≥–Ω–æ—Å—Ç–∏—á–µ—Å–∫–∏–π ZIP –∏ –ø—Ä–æ–≤–µ—Ä—å—Ç–µ metadata/–∫–∞–ª–∏–±—Ä–æ–≤–∫—É.",
+    )
+    _render_blocking_diagnostics(
+        input_context,
+        [*import_issues, runtime_issue],
+        key_prefix="processing_exception",
+    )
+    st.stop()
+blocking = [item for item in validation_issues if bool(item.blocks_processing)]
+if blocking:
+    st.title(f"Soil Stamp Antonov {VERSION}")
+    st.error("–ò–º–ø–æ—Ä—Ç —Å–æ–¥–µ—Ä–∂–∏—Ç –±–ª–æ–∫–∏—Ä—É—é—â–∏–µ –æ—à–∏–±–∫–∏.")
+    _render_blocking_diagnostics(
+        input_context,
+        [*import_issues, *validation_issues],
+        key_prefix="measurement_blocking",
+    )
+    st.stop()
+
+st.sidebar.header("–†–∞–±–æ—á–∏–π —Å–ª–æ–π")
+correction_mode = st.sidebar.radio(
+    "–û—Å–∞–¥–∫–∞",
+    ["raw", "zero_shifted", "seating_corrected"],
+    captions=[
+        "–ò—Å—Ö–æ–¥–Ω–∞—è –∫—Ä–∏–≤–∞—è",
+        "–°–¥–≤–∏–≥ —Ç–æ–ª—å–∫–æ –ø–æ –∏–∑–º–µ—Ä–µ–Ω–Ω–æ–π –Ω—É–ª–µ–≤–æ–π —Ç–æ—á–∫–µ",
+        "–Ø–≤–Ω–æ –∑–∞–¥–∞–Ω–Ω–∞—è –ø–æ—Å–∞–¥–æ—á–Ω–∞—è –ø–æ–ø—Ä–∞–≤–∫–∞",
+    ],
+)
+prepared, correction_issues = apply_settlement_correction(
+    base_prepared,
+    correction_mode,
+    seating_offsets_mm=st.session_state.seating_offsets,
+)
+prepared = _apply_overrides(prepared, correction_mode)
+all_issues = [*import_issues, *validation_issues, *correction_issues]
+failures = failure_summary(prepared)
+
+st.sidebar.header("–í—ã–±–æ—Ä")
+test_options = prepared["test_id"].astype(str).unique().tolist()
+selected_tests = st.sidebar.multiselect("–ò—Å–ø—ã—Ç–∞–Ω–∏—è", test_options, default=test_options)
+filtered = prepared[prepared["test_id"].isin(selected_tests)].copy()
+if filtered.empty:
+    st.warning("–í—ã–±–µ—Ä–∏—Ç–µ —Ö–æ—Ç—è –±—ã –æ–¥–Ω–æ –∏—Å–ø—ã—Ç–∞–Ω–∏–µ.")
+    st.stop()
+selected_indicator_audit = _scope_indicator_table(
+    indicator_processing_audit, selected_tests
+)
+selected_indicator_events = _scope_indicator_table(
+    indicator_processing_events, selected_tests
+)
+selected_indicator_passports = _scope_indicator_table(
+    indicator_calibration_parameters, selected_tests
+)
+
+st.title(f"Soil Stamp Antonov {VERSION}")
+st.caption(
+    f"–°–ª–æ–π: {correction_mode} ¬∑ —Ä–µ–≤–∏–∑–∏—è {st.session_state.revision} ¬∑ "
+    f"{filtered['test_id'].nunique()} –∏—Å–ø—ã—Ç–∞–Ω–∏–π ¬∑ –∏—Å—Ç–æ—á–Ω–∏–∫ "
+    f"{import_info.get('source_type', import_info.get('format', 'unknown'))} ¬∑ source SHA-256 "
+    f"{input_context['provenance'].input_file_sha256[:12]}"
+)
+manual_service = st.session_state.get(MANUAL_SERVICE_KEY)
+manual_current_hash = getattr(
+    getattr(manual_service, "draft", None), "sha256", None
+)
+if (
+    import_info.get("source_type") == "manual"
+    and manual_current_hash
+    and manual_current_hash != st.session_state.get(MANUAL_ACTIVE_HASH_KEY)
+):
+    st.warning(
+        "–ê–∫—Ç–∏–≤–Ω—ã–π –∞–Ω–∞–ª–∏–∑ –ø–æ—Å—Ç—Ä–æ–µ–Ω –ø–æ –ø—Ä–µ–¥—ã–¥—É—â–µ–º—É snapshot —Ä—É—á–Ω–æ–≥–æ —á–µ—Ä–Ω–æ–≤–∏–∫–∞. "
+        "–¢–µ–∫—É—â–∏–µ –ø—Ä–∞–≤–∫–∏ –Ω–µ –ø—Ä–∏–º–µ–Ω–µ–Ω—ã; –ø–µ—Ä–µ–¥–∞–π—Ç–µ –Ω–æ–≤—ã–π snapshot —è–≤–Ω–æ."
+    )
+
+tabs = st.tabs(
+    [
+        "–ò–º–ø–æ—Ä—Ç –∏ QC",
+        "–ö–æ—Ä—Ä–µ–∫—Ü–∏–∏",
+        "–ì—Ä–∞—Ñ–∏–∫–∏",
+        "pcr –∏ E",
+        "–°—Ä–∞–≤–Ω–µ–Ω–∏–µ –≥—Ä—É–ø–ø",
+        "–î–æ–ø. –∞–Ω–∞–ª–∏–∑",
+        "–û—Ç—á—ë—Ç –∏ –∂—É—Ä–Ω–∞–ª",
+        "–í–≤–æ–¥ –≤—Ä—É—á–Ω—É—é",
+    ]
+)
+
+with tabs[7]:
+    render_manual_entry(key_prefix="manual_entry_tab")
+
+with tabs[0]:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("–°—Ç—Ä–æ–∫ –ø—Ä–æ—Ç–æ–∫–æ–ª–∞", len(raw))
+    c2.metric("–ò—Å–ø—ã—Ç–∞–Ω–∏–π", raw["test_id"].nunique())
+    c3.metric("–ò–∑–º–µ—Ä–µ–Ω–Ω—ã—Ö –æ—Å–∞–¥–æ–∫", int(prepared["is_measured"].sum()))
+    c4.metric("–°–æ–±—ã—Ç–∏–π —Ä–∞–∑—Ä—É—à–µ–Ω–∏—è", int(prepared["is_failure"].sum()))
+    st.subheader("–ü–∞—Ä–∞–º–µ—Ç—Ä—ã –∏–º–ø–æ—Ä—Ç–∞")
+    st.json(import_info, expanded=False)
+    st.dataframe(
+        pd.DataFrame(
+            effective_conversion_parameters(
+                metadata, raw["test_id"].dropna().astype(str).unique().tolist()
+            )
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.subheader("–ü–∞—Å–ø–æ—Ä—Ç –ø—Ä–æ–µ–∫—Ç–∞")
+    passport = input_context["passport"]
+    if passport["complete"]:
+        st.success("–û–±—è–∑–∞—Ç–µ–ª—å–Ω—ã–µ –ø–æ–ª—è –ø–∞—Å–ø–æ—Ä—Ç–∞ –∑–∞–ø–æ–ª–Ω–µ–Ω—ã.")
+    else:
+        st.warning("–ü–∞—Å–ø–æ—Ä—Ç –Ω–µ–ø–æ–ª–æ–Ω: " + ", ".join(passport["missing"]))
+    with st.expander("–ü–æ–ª—è –ø–∞—Å–ø–æ—Ä—Ç–∞"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "field": name,
+                        "value": (
+                            json.dumps(value, ensure_ascii=False, default=str)
+                            if isinstance(value, (dict, list, tuple))
+                            else "" if value is None else str(value)
+                        ),
+                        "filled": name not in passport["missing"],
+                    }
+                    for name, value in passport["fields"].items()
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+    st.subheader("–ü–∞—Å–ø–æ—Ä—Ç–∞ –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä–æ–≤")
+    st.caption("–¢–æ–ª—å–∫–æ –¥–ª—è —á—Ç–µ–Ω–∏—è: —ç—Ñ—Ñ–µ–∫—Ç–∏–≤–Ω—ã–µ –ø–∞—Ä–∞–º–µ—Ç—Ä—ã, –∏—Å–ø–æ–ª—å–∑–æ–≤–∞–Ω–Ω—ã–µ –ø—Ä–∏ –ø—Ä–µ–æ–±—Ä–∞–∑–æ–≤–∞–Ω–∏–∏.")
+    if selected_indicator_passports.empty:
+        st.info("–î–ª—è –≤—ã–±—Ä–∞–Ω–Ω—ã—Ö –∏—Å–ø—ã—Ç–∞–Ω–∏–π –ø–æ–∫–∞–Ω–∞–ª—å–Ω—ã–µ –ø–∞—Å–ø–æ—Ä—Ç–∞ –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä–æ–≤ –Ω–µ —Å—Ñ–æ—Ä–º–∏—Ä–æ–≤–∞–Ω—ã.")
+    else:
+        passport_columns = [
+            "test_id",
+            "channel",
+            "indicator_type",
+            "serial_number",
+            "instrument_id",
+            "mode",
+            "range_mm",
+            "division_mm",
+            "correction_factor",
+            "initial_reading",
+            "initial_turn",
+            "zero_correction_mm",
+            "verification_date",
+            "verification_valid_until",
+            "max_increment_mm",
+            "reverse_tolerance_mm",
+            "travel_range_mm",
+            "source_path",
+            "compatibility_mode",
+        ]
+        st.dataframe(
+            _display_safe_frame(
+                selected_indicator_passports[
+                    [
+                        column
+                        for column in passport_columns
+                        if column in selected_indicator_passports
+                    ]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.download_button(
+            "–°–∫–∞—á–∞—Ç—å indicator_calibration_parameters.csv",
+            selected_indicator_passports.to_csv(index=False).encode("utf-8-sig"),
+            "indicator_calibration_parameters.csv",
+            "text/csv",
+        )
+    st.subheader("–ü—Ä–µ–æ–±—Ä–∞–∑–æ–≤–∞–Ω–∏–µ –ø–æ–∫–∞–∑–∞–Ω–∏–π –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä–æ–≤")
+    if selected_indicator_audit.empty:
+        st.info("–¢–∞–±–ª–∏—Ü–∞ –ø—Ä–µ–æ–±—Ä–∞–∑–æ–≤–∞–Ω–∏—è –¥–ª—è –≤—ã–±—Ä–∞–Ω–Ω—ã—Ö –∏—Å–ø—ã—Ç–∞–Ω–∏–π –ø—É—Å—Ç–∞.")
+    else:
+        zero_crossings = (
+            int(selected_indicator_events["event_type"].eq("zero_crossing").sum())
+            if "event_type" in selected_indicator_events
+            else 0
+        )
+        status = selected_indicator_audit.get(
+            "processing_status", pd.Series("", index=selected_indicator_audit.index)
+        )
+        status = status.fillna("").astype(str)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("–°—Ç—Ä–æ–∫ –ø—Ä–µ–æ–±—Ä–∞–∑–æ–≤–∞–Ω–∏—è", len(selected_indicator_audit))
+        c2.metric("–ü–µ—Ä–µ—Ö–æ–¥–æ–≤ —á–µ—Ä–µ–∑ –Ω–æ–ª—å", zero_crossings)
+        c3.metric("QC –Ω–µ ok", int(status.ne("ok").sum()))
+        audit_columns = [
+            "test_id",
+            "channel",
+            "source_row",
+            "manual_row_uuid",
+            "sequence_index",
+            "branch",
+            "original_reading",
+            "raw_reading",
+            "turn_number",
+            "computed_increment_mm",
+            "cumulative_before_correction_mm",
+            "applied_correction_mm",
+            "cumulative_settlement_mm",
+            "settlement_effective_mm",
+            "warning",
+            "processing_status",
+            "conversion_method",
+            "correction_record_ids",
+        ]
+        st.dataframe(
+            _display_safe_frame(
+                selected_indicator_audit[
+                    [column for column in audit_columns if column in selected_indicator_audit]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        c1, c2 = st.columns(2)
+        c1.download_button(
+            "–°–∫–∞—á–∞—Ç—å indicator_processing_audit.csv",
+            selected_indicator_audit.to_csv(index=False).encode("utf-8-sig"),
+            "indicator_processing_audit.csv",
+            "text/csv",
+        )
+        c2.download_button(
+            "–°–∫–∞—á–∞—Ç—å indicator_processing_events.csv",
+            selected_indicator_events.to_csv(index=False).encode("utf-8-sig"),
+            "indicator_processing_events.csv",
+            "text/csv",
+        )
+        with st.expander("–ñ—É—Ä–Ω–∞–ª –ø–µ—Ä–µ—Ö–æ–¥–æ–≤, –æ–±—Ä–∞—Ç–Ω–æ–≥–æ —Ö–æ–¥–∞ –∏ –∫–æ—Ä—Ä–µ–∫—Ü–∏–π"):
+            if selected_indicator_events.empty:
+                st.info("–°–æ–±—ã—Ç–∏–π –ø—Ä–µ–æ–±—Ä–∞–∑–æ–≤–∞–Ω–∏—è –Ω–µ—Ç.")
+            else:
+                st.dataframe(
+                    _display_safe_frame(selected_indicator_events),
+                    width="stretch",
+                    hide_index=True,
+                )
+    st.subheader("Provenance")
+    st.json(input_context["provenance"].to_dict(), expanded=False)
+    if len(input_context["raw_cells"]):
+        with st.expander("–ò—Å—Ö–æ–¥–Ω—ã–µ —è—á–µ–π–∫–∏ –∏ —Ä–∞—Å–ø–æ–∑–Ω–∞–Ω–Ω—ã–µ –∑–Ω–∞—á–µ–Ω–∏—è"):
+            st.dataframe(
+                _display_safe_frame(input_context["raw_cells"]),
+                width="stretch",
+                hide_index=True,
+            )
+            st.download_button(
+                "–°–∫–∞—á–∞—Ç—å raw_cells.csv",
+                input_context["raw_cells"].to_csv(index=False).encode("utf-8-sig"),
+                "raw_cells.csv",
+                "text/csv",
+            )
+    if all_issues:
+        st.subheader("–ö–æ–Ω—Ç—Ä–æ–ª—å –∫–∞—á–µ—Å—Ç–≤–∞")
+        st.dataframe(
+            _display_safe_frame(_issue_frame(all_issues)),
+            width="stretch",
+            hide_index=True,
+        )
+    else:
+        st.success("–ê–≤—Ç–æ–º–∞—Ç–∏—á–µ—Å–∫–∞—è –ø—Ä–æ–≤–µ—Ä–∫–∞ –Ω–µ –æ–±–Ω–∞—Ä—É–∂–∏–ª–∞ –∑–∞–º–µ—á–∞–Ω–∏–π.")
+    st.subheader("–•—Ä–æ–Ω–æ–ª–æ–≥–∏—á–µ—Å–∫–∏–π –ø—Ä–æ—Ç–æ–∫–æ–ª")
+    protocol_columns = [
+        "sheet_name",
+        "source_row",
+        "source_columns",
+        "source_type",
+        "manual_row_uuid",
+        "created_by",
+        "created_at",
+        "modified_by",
+        "modified_at",
+        "test_id",
+        "sequence_no",
+        "sequence_index",
+        "raw_stage",
+        "raw_load",
+        "raw_indicator",
+        "parsed_stage",
+        "parsed_load",
+        "parsed_indicator",
+        "stage",
+        "branch",
+        "branch_suggested",
+        "F_kN",
+        "p_kPa",
+        "settlement_raw_mm",
+        "settlement_mm",
+        "status",
+        "comment",
+    ]
+    st.dataframe(
+        _display_safe_frame(
+            filtered[[column for column in protocol_columns if column in filtered]]
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.subheader("–†–∞–∑—Ä—É—à–µ–Ω–∏–µ –∏ —Ü–µ–Ω–∑—É—Ä–∏—Ä–æ–≤–∞–Ω–∏–µ")
+    st.dataframe(failures[failures["test_id"].isin(selected_tests)], width="stretch", hide_index=True)
+    with st.expander("Metadata"):
+        st.json(metadata)
+
+with tabs[1]:
+    st.write(
+        "–ò—Å—Ö–æ–¥–Ω—ã–π —Å–ª–æ–π —Ö—Ä–∞–Ω–∏—Ç—Å—è –æ—Ç–¥–µ–ª—å–Ω–æ. –ù—É–ª–µ–≤–∞—è –∫–æ—Ä—Ä–µ–∫—Ü–∏—è –∏—Å–ø–æ–ª—å–∑—É–µ—Ç —Ç–æ–ª—å–∫–æ —Ä–µ–∞–ª—å–Ω–æ –∏–∑–º–µ—Ä–µ–Ω–Ω—É—é "
+        "—Ç–æ—á–∫—É –ø—Ä–∏ F=0; –Ω–æ–≤–∞—è —Ç–æ—á–∫–∞ (0;0) –Ω–µ —Å–æ–∑–¥–∞—ë—Ç—Å—è."
+    )
+    correction_preview = filtered[
+        ["test_id", "sequence_no", "F_kN", "settlement_raw_mm", "settlement_mm", "correction_mode"]
+    ].copy()
+    correction_preview["difference_mm"] = (
+        correction_preview["settlement_mm"] - correction_preview["settlement_raw_mm"]
+    )
+    st.dataframe(_display_safe_frame(correction_preview), width="stretch", hide_index=True)
+
+    st.subheader("–ü–æ—Å–∞–¥–æ—á–Ω–∞—è –ø–æ–ø—Ä–∞–≤–∫–∞")
+    with st.form("seating_form"):
+        offsets = {}
+        cols = st.columns(min(3, len(test_options)))
+        for index, test_id in enumerate(test_options):
+            offsets[test_id] = cols[index % len(cols)].number_input(
+                f"{test_id}, –º–º",
+                value=float(st.session_state.seating_offsets.get(test_id, 0.0)),
+                step=0.01,
+                format="%.3f",
+            )
+        seating_reason = st.text_input("–ü—Ä–∏—á–∏–Ω–∞/–º–µ—Ç–æ–¥–∏–∫–∞ –ø–æ–ø—Ä–∞–≤–∫–∏", key="seating_reason")
+        apply_seating = st.form_submit_button("–°–æ–∑–¥–∞—Ç—å —Ä–µ–≤–∏–∑–∏—é –ø–æ—Å–∞–¥–æ—á–Ω–æ–π –ø–æ–ø—Ä–∞–≤–∫–∏")
+    if apply_seating:
+        try:
+            _, _ = apply_settlement_correction(
+                base_prepared,
+                "seating_corrected",
+                seating_offsets_mm=offsets,
+                audit=st.session_state.audit,
+                reason=seating_reason,
+            )
+            st.session_state.seating_offsets = offsets
+            st.session_state.revision += 1
+            st.session_state.pcr_results = {}
+            st.session_state.pcr_latest = {}
+            st.session_state.analysis_tables = {}
+            st.session_state.e_latest = {}
+            st.session_state.figure_exports = {}
+            st.session_state.bundle_cache = {}
+            st.success("–ù–æ–≤–∞—è —Ä–µ–≤–∏–∑–∏—è –∑–∞–ø–∏—Å–∞–Ω–∞ –≤ audit trail.")
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+    st.subheader("–†—É—á–Ω–∞—è –∫–æ—Ä—Ä–µ–∫—Ü–∏—è –æ–¥–Ω–æ–π —Ç–æ—á–∫–∏")
+    if correction_mode == "raw":
+        st.info("–°–ª–æ–π raw –¥–æ—Å—Ç—É–ø–µ–Ω —Ç–æ–ª—å–∫–æ –¥–ª—è —á—Ç–µ–Ω–∏—è. –í—ã–±–µ—Ä–∏—Ç–µ zero_shifted –∏–ª–∏ seating_corrected.")
+    else:
+        with st.form("manual_point_form"):
+            manual_test = st.selectbox("–ò—Å–ø—ã—Ç–∞–Ω–∏–µ", test_options, key="manual_test")
+            test_rows = prepared[prepared["test_id"].astype(str) == manual_test]
+            sequence_options = test_rows["sequence_no"].astype(int).tolist()
+            manual_sequence = st.selectbox("sequence_no", sequence_options)
+            current_row = test_rows[test_rows["sequence_no"] == manual_sequence].iloc[0]
+            current_value = current_row["settlement_mm"]
+            manual_value = st.number_input(
+                "–ù–æ–≤–æ–µ –∑–Ω–∞—á–µ–Ω–∏–µ s, –º–º",
+                value=float(current_value) if pd.notna(current_value) else 0.0,
+                step=0.01,
+                format="%.3f",
+            )
+            manual_reason = st.text_input("–û–±–æ—Å–Ω–æ–≤–∞–Ω–∏–µ", key="manual_reason")
+            apply_manual = st.form_submit_button("–°–æ–∑–¥–∞—Ç—å —Ä–µ–≤–∏–∑–∏—é —Ä—É—á–Ω–æ–π –∫–æ—Ä—Ä–µ–∫—Ü–∏–∏")
+        if apply_manual:
+            try:
+                apply_manual_point_correction(
+                    prepared,
+                    test_id=manual_test,
+                    sequence_no=int(manual_sequence),
+                    corrected_settlement_mm=float(manual_value),
+                    reason=manual_reason,
+                    audit=st.session_state.audit,
+                )
+                st.session_state.manual_overrides.append(
+                    {
+                        "test_id": manual_test,
+                        "sequence_no": int(manual_sequence),
+                        "value_mm": float(manual_value),
+                        "base_mode": correction_mode,
+                    }
+                )
+                st.session_state.revision += 1
+                st.session_state.pcr_results = {}
+                st.session_state.pcr_latest = {}
+                st.session_state.analysis_tables = {}
+                st.session_state.e_latest = {}
+                st.session_state.figure_exports = {}
+                st.session_state.bundle_cache = {}
+                st.success("–ö–æ—Ä—Ä–µ–∫—Ü–∏—è –¥–æ–±–∞–≤–ª–µ–Ω–∞ –∫–∞–∫ –Ω–æ–≤–∞—è —Ä–µ–≤–∏–∑–∏—è; raw –Ω–µ –∏–∑–º–µ–Ω—ë–Ω.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+
+with tabs[2]:
+    controls = st.columns([1.25, 1.15, 1.0, 1.0])
+    graph_mode = controls[0].selectbox(
+        "–†–µ–∂–∏–º",
+        ["raw_protocol", "antonov_publication", "group_mean_ci", "diagnostic", "normalized"],
+    )
+    if graph_mode == "normalized":
+        axis_options = [
+            "p-s/D",
+            "p/pu-s/D",
+            "F/(gammaD3)-s/D",
+            "p/(gammaD)-s/D",
+        ]
+        default_axis = 0
+    elif graph_mode == "diagnostic":
+        axis_options = ["p-s"]
+        default_axis = 0
+    else:
+        axis_options = ["F-s", "p-s", "p-s/D"]
+        default_axis = 1 if filtered["D_mm"].nunique() > 1 else 0
+    axis_mode = controls[1].selectbox("–û—Å–∏", axis_options, index=default_axis)
+    ci_method = controls[2].selectbox("95% –î–ò", ["t", "simultaneous_bootstrap"])
+    bootstrap_graph = controls[3].number_input("Bootstrap", min_value=100, max_value=5000, value=300, step=100)
+    grid_controls = st.columns(3)
+    major_step = grid_controls[0].number_input("Major step (0 = auto)", min_value=0.0, value=0.0, step=10.0)
+    minor_step = grid_controls[1].number_input("Minor step (0 = auto)", min_value=0.0, value=0.0, step=5.0)
+    fixed = grid_controls[2].checkbox("–§–∏–∫—Å–∏—Ä–æ–≤–∞–Ω–Ω—ã–π –º–∞—Å—à—Ç–∞–±")
+    fixed_axes = None
+    if fixed:
+        limits = st.columns(4)
+        fixed_axes = (
+            limits[0].number_input("x min", value=0.0),
+            limits[1].number_input("x max", value=500.0),
+            limits[2].number_input("s min", value=0.0),
+            limits[3].number_input("s max", value=10.0),
+        )
+    diagnostic_result = None
+    if graph_mode == "diagnostic":
+        diagnostic_test = st.selectbox("–ò—Å–ø—ã—Ç–∞–Ω–∏–µ –¥–ª—è –¥–∏–∞–≥–Ω–æ—Å—Ç–∏–∫–∏", selected_tests, key="diag_test")
+        graph_data = filtered[filtered["test_id"].astype(str) == diagnostic_test]
+        diagnostic_context = (
+            f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{diagnostic_test}"
+        )
+        latest_key = st.session_state.pcr_latest.get(diagnostic_context)
+        diagnostic_result = st.session_state.pcr_results.get(latest_key) if latest_key else None
+    else:
+        graph_data = filtered
+    try:
+        plot_output = plot_curves(
+            graph_data,
+            mode=graph_mode,
+            axis_mode=axis_mode,
+            ci_method="t" if ci_method == "t" else "simultaneous",
+            fixed_axes=fixed_axes,
+            major_step=major_step or None,
+            minor_step=minor_step or None,
+            pcr_result=diagnostic_result,
+            bootstrap=int(bootstrap_graph),
+            seed=202604,
+        )
+        for warning in plot_output.warnings:
+            st.warning(warning)
+        st.pyplot(plot_output.figure, width="stretch")
+        st.caption(plot_output.caption)
+        export_spec = {
+            "dataset": dataset_key,
+            "revision": st.session_state.revision,
+            "correction_mode": correction_mode,
+            "tests": selected_tests,
+            "mode": graph_mode,
+            "axis": axis_mode,
+            "ci": ci_method,
+            "fixed": fixed_axes,
+            "major": major_step,
+            "minor": minor_step,
+            "bootstrap": int(bootstrap_graph),
+            "pcr": diagnostic_result.to_dict() if diagnostic_result is not None else None,
+        }
+        export_key = hashlib.sha1(
+            json.dumps(export_spec, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        if st.button("–ü–æ–¥–≥–æ—Ç–æ–≤–∏—Ç—å SVG, PDF –∏ PNG 600 dpi", key="prepare_figure_exports"):
+            with st.spinner("–§–æ—Ä–º–∏—Ä–æ–≤–∞–Ω–∏–µ –ø—É–±–ª–∏–∫–∞—Ü–∏–æ–Ω–Ω—ã—Ö —Ñ–∞–π–ª–æ–≤‚Ä¶"):
+                st.session_state.figure_exports[export_key] = {
+                    "svg": export_figure(plot_output.figure, "svg"),
+                    "pdf": export_figure(plot_output.figure, "pdf"),
+                    "png": export_figure(plot_output.figure, "png"),
+                }
+        cached_exports = st.session_state.figure_exports.get(export_key)
+        if cached_exports:
+            exports = st.columns(3)
+            exports[0].download_button(
+                "SVG",
+                cached_exports["svg"],
+                "soil_stamp_antonov.svg",
+                "image/svg+xml",
+                width="stretch",
+            )
+            exports[1].download_button(
+                "PDF",
+                cached_exports["pdf"],
+                "soil_stamp_antonov.pdf",
+                "application/pdf",
+                width="stretch",
+            )
+            exports[2].download_button(
+                "PNG 600 dpi",
+                cached_exports["png"],
+                "soil_stamp_antonov_600dpi.png",
+                "image/png",
+                width="stretch",
+            )
+    except Exception as exc:
+        plot_output = None
+        st.error(f"–ì—Ä–∞—Ñ–∏–∫ –Ω–µ –ø–æ—Å—Ç—Ä–æ–µ–Ω: {exc}")
+
+    if st.checkbox("–ü–æ–∫–∞–∑–∞—Ç—å —Å—Ö–µ–º—É —à—Ç–∞–º–ø–∞ –∏ –∞—Ä–º–∏—Ä–æ–≤–∞–Ω–∏—è"):
+        schematic_figure = plot_stamp_schematic(metadata)
+        st.pyplot(schematic_figure, width="content")
+        plt.close(schematic_figure)
+
+with tabs[3]:
+    analysis_test = st.selectbox("–ò—Å–ø—ã—Ç–∞–Ω–∏–µ", selected_tests, key="analysis_test")
+    test_frame = filtered[filtered["test_id"].astype(str) == analysis_test]
+    a1, a2, a3 = st.columns(3)
+    bootstrap_n = a1.number_input("Bootstrap pcr/E", min_value=100, max_value=10000, value=500, step=100)
+    seed = a2.number_input("Seed", min_value=0, value=202604, step=1)
+    calculate = a3.button("–†–∞—Å—Å—á–∏—Ç–∞—Ç—å pcr", type="primary", width="stretch")
+    result_context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{analysis_test}"
+    result_key = f"{result_context}:{int(bootstrap_n)}:{int(seed)}"
+    if calculate:
+        try:
+            with st.spinner("–°–µ–≥–º–µ–Ω—Ç–∏—Ä–æ–≤–∞–Ω–Ω–∞—è —Ä–µ–≥—Ä–µ—Å—Å–∏—è –∏ bootstrap‚Ä¶"):
+                st.session_state.pcr_results[result_key] = fit_segmented_pcr(
+                    test_frame, bootstrap=int(bootstrap_n), seed=int(seed)
+                )
+                st.session_state.pcr_latest[result_context] = result_key
+                st.session_state.e_latest.pop(result_context, None)
+                st.session_state.bundle_cache = {}
+        except Exception as exc:
+            st.error(f"pcr –Ω–µ —Ä–∞—Å—Å—á–∏—Ç–∞–Ω–æ: {exc}")
+    pcr_result = st.session_state.pcr_results.get(result_key)
+    if pcr_result:
+        metrics = st.columns(4)
+        metrics[0].metric("pcr auto, –∫–ü–∞", f"{pcr_result.pcr_auto:.2f}")
+        metrics[1].metric(
+            "95% –î–ò, –∫–ü–∞",
+            (
+                f"{pcr_result.pcr_ci_low:.2f}‚Äì{pcr_result.pcr_ci_high:.2f}"
+                if pcr_result.pcr_ci_low is not None
+                else "–Ω–µ—É—Å—Ç–æ–π—á–∏–≤"
+            ),
+        )
+        metrics[2].metric("R¬≤", f"{pcr_result.r2:.4f}")
+        metrics[3].metric("AIC / BIC", f"{pcr_result.aic:.1f} / {pcr_result.bic:.1f}")
+        diag = plot_curves(
+            test_frame, mode="diagnostic", axis_mode="p-s", pcr_result=pcr_result
+        )
+        st.pyplot(diag.figure, width="stretch")
+        plt.close(diag.figure)
+        with st.expander("–ö–æ—ç—Ñ—Ñ–∏—Ü–∏–µ–Ω—Ç—ã, –æ—Å—Ç–∞—Ç–∫–∏ –∏ –∞–ª—å—Ç–µ—Ä–Ω–∞—Ç–∏–≤–Ω–∞—è –¥–≤—É—Ö–ª–∏–Ω–µ–π–Ω–∞—è –º–æ–¥–µ–ª—å"):
+            st.json(pcr_result.to_dict())
+        with st.form("manual_pcr_form"):
+            manual_pcr_value = st.number_input("–ü–æ–¥—Ç–≤–µ—Ä–∂–¥—ë–Ω–Ω–æ–µ pcr, –∫–ü–∞", value=float(pcr_result.pcr_auto))
+            manual_pcr_author = st.text_input(
+                "–ê–≤—Ç–æ—Ä –ø–æ–¥—Ç–≤–µ—Ä–∂–¥–µ–Ω–∏—è pcr",
+                value=str((metadata.get("project_passport") or {}).get("operator") or ""),
+            )
+            manual_pcr_reason = st.text_input("–û–±–æ—Å–Ω–æ–≤–∞–Ω–∏–µ —Ä—É—á–Ω–æ–≥–æ —Ä–µ—à–µ–Ω–∏—è", key="pcr_reason")
+            confirm_pcr = st.form_submit_button("–°–æ—Ö—Ä–∞–Ω–∏—Ç—å —Ä—è–¥–æ–º —Å –∞–≤—Ç–æ–º–∞—Ç–∏—á–µ—Å–∫–∏–º")
+        if confirm_pcr:
+            try:
+                if not str(manual_pcr_author).strip():
+                    raise ValueError("–î–ª—è –ø–æ–¥—Ç–≤–µ—Ä–∂–¥–µ–Ω–∏—è pcr —É–∫–∞–∂–∏—Ç–µ –∞–≤—Ç–æ—Ä–∞ —Ä–µ—à–µ–Ω–∏—è.")
+                st.session_state.pcr_results[result_key] = confirm_manual_pcr(
+                    pcr_result,
+                    manual_pcr_value,
+                    reason=manual_pcr_reason,
+                    audit=st.session_state.audit,
+                    scope=analysis_test,
+                    user=str(manual_pcr_author).strip(),
+                )
+                st.session_state.e_latest.pop(result_context, None)
+                st.session_state.bundle_cache = {}
+                st.success("–ê–≤—Ç–æ–º–∞—Ç–∏—á–µ—Å–∫–∏–π —Ä–µ–∑—É–ª—å—Ç–∞—Ç —Å–æ—Ö—Ä–∞–Ω—ë–Ω; —Ä—É—á–Ω–æ–µ –ø–æ–¥—Ç–≤–µ—Ä–∂–¥–µ–Ω–∏–µ –¥–æ–±–∞–≤–ª–µ–Ω–æ –æ—Ç–¥–µ–ª—å–Ω–æ.")
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+    else:
+        st.info("–ó–∞–ø—É—Å—Ç–∏—Ç–µ —Ä–∞—Å—á—ë—Ç pcr. –ò—Å–ø–æ–ª—å–∑—É—é—Ç—Å—è —É—Å—Ç–æ–π—á–∏–≤—ã–µ —Ç–æ—á–∫–∏ –ø–µ—Ä–≤–æ–π –≤–µ—Ç–≤–∏ loading.")
+
+    st.divider()
+    st.subheader("E_stamp_app –∏ –∂—ë—Å—Ç–∫–æ—Å—Ç—å")
+    finite_p = test_frame.loc[
+        (test_frame["branch"] == "loading") & test_frame["p_kPa"].notna() & test_frame["settlement_mm"].notna(),
+        "p_kPa",
+    ]
+    if finite_p.nunique() >= 2:
+        pmin_data, pmax_data = float(finite_p.min()), float(finite_p.max())
+        try:
+            base_e_resolution = resolve_modulus_method(
+                metadata,
+                analysis_test,
+                pcr_result=pcr_result,
+                available_p_range=(pmin_data, pmax_data),
+            )
+        except ValueError as exc:
+            st.warning(f"Metadata –º–µ—Ç–æ–¥–∏–∫–∏ E —Ç—Ä–µ–±—É–µ—Ç –∏—Å–ø—Ä–∞–≤–ª–µ–Ω–∏—è: {exc}")
+            base_e_resolution = resolve_modulus_method(
+                {}, analysis_test, available_p_range=(pmin_data, pmax_data)
+            )
+        profile_options = list(modulus_profile_ids())
+        profile_index = (
+            profile_options.index(base_e_resolution.profile_id)
+            if base_e_resolution.profile_id in profile_options
+            else profile_options.index("diagnostic_unapproved_v1")
+        )
+        resolved_p_range = (
+            float(base_e_resolution.p_min_kpa),
+            float(base_e_resolution.p_max_kpa),
+        )
+        if not (
+            pmin_data <= resolved_p_range[0] < resolved_p_range[1] <= pmax_data
+        ):
+            resolved_p_range = (pmin_data, pmax_data)
+        with st.form(f"modulus_method_form:{analysis_test}"):
+            method_controls = st.columns(3)
+            method_profile = method_controls[0].selectbox(
+                "–ü—Ä–æ—Ñ–∏–ª—å –º–µ—Ç–æ–¥–∏–∫–∏ E",
+                profile_options,
+                index=profile_index,
+            )
+            range_source_options = ["explicit", "accepted_pcr", "project_profile"]
+            source_index = (
+                range_source_options.index(base_e_resolution.p_range_source)
+                if base_e_resolution.p_range_source in range_source_options
+                else 0
+            )
+            e_range_source = method_controls[1].selectbox(
+                "–ò—Å—Ç–æ—á–Ω–∏–∫ –¥–∏–∞–ø–∞–∑–æ–Ω–∞ E",
+                range_source_options,
+                index=source_index,
+            )
+            p_range = method_controls[2].slider(
+                "–î–∏–∞–ø–∞–∑–æ–Ω p, –∫–ü–∞",
+                min_value=pmin_data,
+                max_value=pmax_data,
+                value=resolved_p_range,
+            )
+            selected_profile = get_modulus_profile(method_profile)
+            coefficient_controls = st.columns(2)
+            nu_default = (
+                float(selected_profile.nu)
+                if selected_profile.nu is not None
+                else float(base_e_resolution.nu)
+            )
+            shape_default = (
+                float(selected_profile.shape_factor)
+                if selected_profile.shape_factor is not None
+                else float(base_e_resolution.shape_factor)
+            )
+            nu = coefficient_controls[0].number_input(
+                "ŒΩ", min_value=0.0, max_value=0.49, value=nu_default, step=0.01
+            )
+            shape_factor = coefficient_controls[1].number_input(
+                "–ö–æ—ç—Ñ—Ñ–∏—Ü–∏–µ–Ω—Ç —Ñ–æ—Ä–º—ã", min_value=0.01, value=shape_default, step=0.05
+            )
+            confirm_e_range = st.checkbox(
+                "–ü–æ–¥—Ç–≤–µ—Ä–∂–¥–∞—é –¥–∏–∞–ø–∞–∑–æ–Ω –∏ –ø–∞—Ä–∞–º–µ—Ç—Ä—ã –¥–ª—è —É—Å–ª–æ–≤–Ω–æ–≥–æ E_stamp_app"
+            )
+            approval_controls = st.columns(2)
+            passport_operator = str(
+                (metadata.get("project_passport") or {}).get("operator") or ""
+            )
+            e_range_author = approval_controls[0].text_input(
+                "–ê–≤—Ç–æ—Ä —Ä–µ—à–µ–Ω–∏—è", value=passport_operator
+            )
+            e_range_reason = approval_controls[1].text_input("–û–±–æ—Å–Ω–æ–≤–∞–Ω–∏–µ —Ä–µ—à–µ–Ω–∏—è")
+            calculate_e = st.form_submit_button("–†–∞—Å—Å—á–∏—Ç–∞—Ç—å E", width="stretch")
+        e_spec = {
+            "dataset": dataset_key,
+            "revision": st.session_state.revision,
+            "correction_mode": correction_mode,
+            "test_id": analysis_test,
+            "method_profile": method_profile,
+            "p_range_source": e_range_source,
+            "proposed_p_range": [float(p_range[0]), float(p_range[1])],
+            "nu": float(nu),
+            "shape_factor": float(shape_factor),
+            "confirmed": bool(confirm_e_range),
+            "approval_author": str(e_range_author).strip(),
+            "approval_reason": str(e_range_reason).strip(),
+            "accepted_pcr": (
+                {
+                    "value_kPa": pcr_result.pcr_manual,
+                    "author": pcr_result.manual_author,
+                    "confirmed_at_utc": pcr_result.manual_confirmed_at_utc,
+                    "reason": pcr_result.manual_reason,
+                }
+                if pcr_result is not None and pcr_result.pcr_manual is not None
+                else None
+            ),
+            "bootstrap": int(bootstrap_n),
+            "seed": int(seed),
+        }
+        e_key = "E:" + hashlib.sha1(
+            json.dumps(e_spec, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if calculate_e:
+            try:
+                approved_at = (
+                    datetime.now(timezone.utc).isoformat()
+                    if confirm_e_range
+                    and str(e_range_author).strip()
+                    and str(e_range_reason).strip()
+                    else None
+                )
+                profile_changed = method_profile != base_e_resolution.profile_id
+                nu_override = (
+                    None
+                    if not profile_changed
+                    and abs(float(nu) - float(base_e_resolution.nu)) < 1e-12
+                    else float(nu)
+                )
+                shape_override = (
+                    None
+                    if not profile_changed
+                    and abs(
+                        float(shape_factor) - float(base_e_resolution.shape_factor)
+                    )
+                    < 1e-12
+                    else float(shape_factor)
+                )
+                manual_decision = ModulusOverrides(
+                    profile_id=method_profile if profile_changed else None,
+                    p_range_kpa=(
+                        (float(p_range[0]), float(p_range[1]))
+                        if confirm_e_range and e_range_source != "project_profile"
+                        else None
+                    ),
+                    p_range_source=e_range_source if confirm_e_range else None,
+                    nu=nu_override,
+                    shape_factor=shape_override,
+                    approval_status="approved" if approved_at else None,
+                    author=str(e_range_author).strip() or None,
+                    timestamp_utc=approved_at,
+                    reason=str(e_range_reason).strip() or None,
+                )
+                e_result = calculate_moduli_for_test(
+                    test_frame,
+                    metadata,
+                    analysis_test,
+                    manual_confirmation=manual_decision,
+                    pcr_result=pcr_result,
+                    bootstrap=int(bootstrap_n),
+                    seed=int(seed),
+                )
+                e_result.insert(0, "test_id", analysis_test)
+                e_spec["resolved_methodology"] = e_result.attrs.get(
+                    "modulus_resolution", {}
+                )
+                e_result.attrs["analysis_spec"] = e_spec
+                st.session_state.analysis_tables[e_key] = e_result
+                st.session_state.e_latest[result_context] = e_key
+                resolved = e_result.attrs.get("modulus_resolution", {})
+                st.session_state.audit.record(
+                    "resolve_modulus_method",
+                    scope=analysis_test,
+                    reason=str(e_range_reason).strip() or "–ü—Ä–æ–≤–µ—Ä–∫–∞ –º–µ—Ç–æ–¥–∏—á–µ—Å–∫–æ–≥–æ –∫–æ–Ω—Ç—Ä–∞–∫—Ç–∞ E",
+                    parameters=resolved,
+                    user=str(e_range_author).strip() or "local-user",
+                    method="manual_confirmation" if confirm_e_range else "methodology_resolver",
+                )
+                st.session_state.bundle_cache = {}
+            except Exception as exc:
+                st.error(f"–ú–æ–¥—É–ª—å –Ω–µ —Ä–∞—Å—Å—á–∏—Ç–∞–Ω: {exc}")
+        moduli = st.session_state.analysis_tables.get(e_key)
+        if moduli is not None:
+            resolved = moduli.attrs.get("modulus_resolution", {})
+            st.caption(
+                f"–ü—Ä–æ—Ñ–∏–ª—å: {resolved.get('profile_id', '‚Äî')}@"
+                f"{resolved.get('profile_version', '‚Äî')}; —Å—Ç–∞—Ç—É—Å: "
+                f"{resolved.get('review_status', 'review_required')}; "
+                f"–¥–∏–∞–ø–∞–∑–æ–Ω: {resolved.get('p_range_source', '‚Äî')}."
+            )
+            primary = moduli[moduli["is_primary"].fillna(False).astype(bool)]
+            headline = moduli[moduli["method"].isin(["E_regression", "E_secant"])]
+            if primary.empty:
+                st.warning(
+                    "–û—Å–Ω–æ–≤–Ω–æ–π E –Ω–µ –≤—ã–¥–∞–Ω: —Ä–µ–∑—É–ª—å—Ç–∞—Ç —è–≤–ª—è–µ—Ç—Å—è –¥–∏–∞–≥–Ω–æ—Å—Ç–∏—á–µ—Å–∫–∏–º –∏ —Ç—Ä–µ–±—É–µ—Ç "
+                    "–∏–Ω–∂–µ–Ω–µ—Ä–Ω–æ–π –ø—Ä–æ–≤–µ—Ä–∫–∏ –º–µ—Ç–æ–¥–∏–∫–∏/–¥–∏–∞–ø–∞–∑–æ–Ω–∞."
+                )
+                st.dataframe(headline, width="stretch", hide_index=True)
+            else:
+                st.success("–û—Å–Ω–æ–≤–Ω–æ–π —É—Å–ª–æ–≤–Ω—ã–π E —Ä–∞—Å—Å—á–∏—Ç–∞–Ω –ø–æ –ø–æ–¥—Ç–≤–µ—Ä–∂–¥—ë–Ω–Ω–æ–º—É –∫–æ–Ω—Ç—Ä–∞–∫—Ç—É.")
+                st.dataframe(primary, width="stretch", hide_index=True)
+            with st.expander("–î–æ–ø–æ–ª–Ω–∏—Ç–µ–ª—å–Ω—ã–µ –∏ –¥–∏–∞–≥–Ω–æ—Å—Ç–∏—á–µ—Å–∫–∏–µ —Ä–µ–∑—É–ª—å—Ç–∞—Ç—ã E"):
+                st.dataframe(
+                    moduli[~moduli.index.isin(primary.index)],
+                    width="stretch",
+                    hide_index=True,
+                )
+            regression_row = moduli[moduli["method"] == "E_regression"].iloc[0]
+            sensitivity = modulus_sensitivity(
+                regression_row["slope_m_per_kPa"] * 1000.0,
+                float(test_frame["D_mm"].dropna().iloc[0]),
+            )
+            with st.expander("–ß—É–≤—Å—Ç–≤–∏—Ç–µ–ª—å–Ω–æ—Å—Ç—å –∫ ŒΩ –∏ –∫–æ—ç—Ñ—Ñ–∏—Ü–∏–µ–Ω—Ç—É —Ñ–æ—Ä–º—ã"):
+                st.dataframe(sensitivity, width="stretch", hide_index=True)
+    else:
+        st.warning("–ù–µ–¥–æ—Å—Ç–∞—Ç–æ—á–Ω–æ loading-—Ç–æ—á–µ–∫ –¥–ª—è E.")
+
+with tabs[4]:
+    groups = filtered["group"].astype(str).unique().tolist()
+    if len(groups) < 2:
+        st.info("–î–ª—è —Å—Ä–∞–≤–Ω–µ–Ω–∏—è –Ω—É–∂–Ω—ã –º–∏–Ω–∏–º—É–º –¥–≤–µ –≥—Ä—É–ø–ø—ã.")
+    else:
+        gcols = st.columns(4)
+        baseline_group = gcols[0].selectbox("Baseline", groups, index=0)
+        reinforced_candidates = [name for name in groups if name != baseline_group]
+        reinforced_group = gcols[1].selectbox("Reinforced", reinforced_candidates)
+        compare_bootstrap = gcols[2].number_input("Bootstrap —Å—Ä–∞–≤–Ω–µ–Ω–∏—è", 100, 10000, 1000, 100)
+        run_compare = gcols[3].button("–°—Ä–∞–≤–Ω–∏—Ç—å", type="primary", width="stretch")
+        comparison_spec = {
+            "dataset": dataset_key,
+            "revision": st.session_state.revision,
+            "correction_mode": correction_mode,
+            "selected_tests": sorted(selected_tests),
+            "baseline_group": baseline_group,
+            "reinforced_group": reinforced_group,
+            "bootstrap": int(compare_bootstrap),
+            "seed": 202604,
+        }
+        comparison_key = "CMP:" + hashlib.sha1(
+            json.dumps(comparison_spec, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        if run_compare:
+            try:
+                comparison_result = compare_groups(
+                    filtered,
+                    baseline_group,
+                    reinforced_group,
+                    bootstrap=int(compare_bootstrap),
+                    seed=202604,
+                )
+                comparison_result.insert(0, "baseline_group", baseline_group)
+                comparison_result.insert(1, "reinforced_group", reinforced_group)
+                comparison_result.attrs["analysis_spec"] = comparison_spec
+                st.session_state.analysis_tables[comparison_key] = comparison_result
+                st.session_state.bundle_cache = {}
+            except Exception as exc:
+                st.error(f"–°—Ä–∞–≤–Ω–µ–Ω–∏–µ –Ω–µ —Ä–∞—Å—Å—á–∏—Ç–∞–Ω–æ: {exc}")
+        comparison = st.session_state.analysis_tables.get(comparison_key)
+        if comparison is not None:
+            st.dataframe(comparison, width="stretch", hide_index=True)
+            fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.2), sharex=True, constrained_layout=True)
+            axes[0].plot(comparison["p_kPa"], comparison["k_s"], color="black", marker="o", markerfacecolor="white")
+            axes[0].fill_between(
+                comparison["p_kPa"], comparison["k_s_ci_low"], comparison["k_s_ci_high"], color="black", alpha=0.1
+            )
+            axes[0].axhline(1.0, color="0.5", linestyle="--")
+            axes[0].set_ylabel("k_s = s_reinf/s_base")
+            axes[1].plot(comparison["p_kPa"], comparison["delta_s_mm"], color="black", marker="s", markerfacecolor="white")
+            axes[1].fill_between(
+                comparison["p_kPa"], comparison["delta_s_ci_low_mm"], comparison["delta_s_ci_high_mm"], color="black", alpha=0.1
+            )
+            axes[1].set_ylabel("Œîs, –º–º")
+            axes[1].set_xlabel("p, –∫–ü–∞")
+            for axis in axes:
+                axis.grid(True, color="0.82", linewidth=0.5)
+            st.pyplot(fig, width="stretch")
+            plt.close(fig)
+            if min(comparison["n_baseline"].min(), comparison["n_reinforced"].min()) < 5:
+                st.warning("n < 5: —Å—Ä–∞–≤–Ω–µ–Ω–∏–µ —Å–ª–µ–¥—É–µ—Ç —Ç—Ä–∞–∫—Ç–æ–≤–∞—Ç—å –∫–∞–∫ –æ–ø–∏—Å–∞—Ç–µ–ª—å–Ω–æ–µ.")
+
+with tabs[5]:
+    st.subheader("–ò–Ω–∫—Ä–µ–º–µ–Ω—Ç—ã, –ø–æ–¥–∞—Ç–ª–∏–≤–æ—Å—Ç—å –∏ –∂—ë—Å—Ç–∫–æ—Å—Ç—å")
+    derivatives = derivative_diagnostics(filtered)
+    st.dataframe(derivatives, width="stretch", hide_index=True)
+    qcols = st.columns(2)
+    target_p = qcols[0].number_input("–û—Å–∞–¥–∫–∞ –ø—Ä–∏ p, –∫–ü–∞", value=100.0)
+    target_s = qcols[1].number_input("–î–∞–≤–ª–µ–Ω–∏–µ –ø—Ä–∏ s, –º–º", value=1.0)
+    settlement_at_target = value_at_pressure(filtered, target_p)
+    pressure_at_target = pressure_at_settlement(filtered, target_s)
+    st.dataframe(settlement_at_target, width="stretch", hide_index=True)
+    st.dataframe(pressure_at_target, width="stretch", hide_index=True)
+
+    st.subheader("–†–∞–±–æ—Ç–∞ –¥–µ—Ñ–æ—Ä–º–∏—Ä–æ–≤–∞–Ω–∏—è –∏ —Ä–∞–∑–≥—Ä—É–∑–∫–∞")
+    work_table = deformation_work(filtered)
+    st.dataframe(work_table, width="stretch", hide_index=True)
+    hysteresis = hysteresis_metrics(filtered)
+    if hysteresis.empty:
+        st.info("–í –≤—ã–±—Ä–∞–Ω–Ω—ã—Ö –∏—Å–ø—ã—Ç–∞–Ω–∏—è—Ö –Ω–µ—Ç –ø–æ–ª–Ω–æ–π –≤–µ—Ç–≤–∏ —Ä–∞–∑–≥—Ä—É–∑–∫–∏.")
+    else:
+        st.dataframe(hysteresis, width="stretch", hide_index=True)
+
+    st.subheader("–í—Ä–µ–º—è —Å—Ç–∞–±–∏–ª–∏–∑–∞—Ü–∏–∏")
+    rate = st.number_input("–ü–æ—Ä–æ–≥ |ds/dt|, –º–º/–º–∏–Ω", min_value=0.0001, value=0.01, format="%.4f")
+    stabilization = time_stabilization(filtered, rate_threshold_mm_per_min=float(rate))
+    if stabilization.empty:
+        st.info("–î–ª—è —Ä–∞—Å—á—ë—Ç–∞ –Ω—É–∂–Ω—ã –ø–æ–≤—Ç–æ—Ä–Ω—ã–µ –≤—Ä–µ–º–µ–Ω–Ω—ã–µ –∏–∑–º–µ—Ä–µ–Ω–∏—è –≤–Ω—É—Ç—Ä–∏ —Å—Ç—É–ø–µ–Ω–∏.")
+    else:
+        st.dataframe(stabilization, width="stretch", hide_index=True)
+
+    st.subheader("–û—Å–∞–¥–∫–∞ —Ü–µ–Ω—Ç—Ä–∞ –∏ –∫—Ä–µ–Ω")
+    tilt = center_and_tilt(
+        filtered,
+        metadata.get("indicator_positions_mm"),
+    )
+    if tilt.empty:
+        if any(f"indicator_{index}" in filtered.columns for index in range(1, 5)) and not bool(
+            filtered.get("indicator_calibration_confirmed", pd.Series(False, index=filtered.index)).any()
+        ):
+            st.info(
+                "–†–∞—Å—á—ë—Ç —Ü–µ–Ω—Ç—Ä–∞ –∏ –∫—Ä–µ–Ω–∞ –æ—Ç–∫–ª—é—á—ë–Ω: –∫–∞–ª–∏–±—Ä–æ–≤–∫–∞ indicator_* –Ω–µ –ø–æ–¥—Ç–≤–µ—Ä–∂–¥–µ–Ω–∞ —è–≤–Ω–æ. "
+                "–ü—Ä—è–º–∞—è settlement –ø—Ä–∏ —ç—Ç–æ–º –æ—Å—Ç–∞—ë—Ç—Å—è –∞–∫—Ç–∏–≤–Ω–æ–π."
+            )
+        else:
+            st.info("–ù–∞–ø—Ä–∞–≤–ª–µ–Ω–∏–µ –∫—Ä–µ–Ω–∞ –¥–æ—Å—Ç—É–ø–Ω–æ —Ç–æ–ª—å–∫–æ –ø—Ä–∏ –∫–æ–æ—Ä–¥–∏–Ω–∞—Ç–∞—Ö –º–∏–Ω–∏–º—É–º —Ç—Ä—ë—Ö –∏–Ω–¥–∏–∫–∞—Ç–æ—Ä–æ–≤.")
+    else:
+        st.dataframe(tilt, width="stretch", hide_index=True)
+
+with tabs[6]:
+    pcr_by_test = {}
+    for test_id in selected_tests:
+        context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{test_id}"
+        latest_key = st.session_state.pcr_latest.get(context)
+        if latest_key and latest_key in st.session_state.pcr_results:
+            pcr_by_test[test_id] = st.session_state.pcr_results[latest_key]
+    e_tables = []
+    for test_id in selected_tests:
+        context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{test_id}"
+        latest_e_key = st.session_state.e_latest.get(context)
+        latest_e = st.session_state.analysis_tables.get(latest_e_key)
+        if isinstance(latest_e, pd.DataFrame):
+            e_tables.append(latest_e)
+    report_moduli = pd.concat(e_tables, ignore_index=True) if e_tables else None
+    current_caption = plot_output.caption if "plot_output" in locals() and plot_output is not None else None
+    current_warnings = plot_output.warnings if "plot_output" in locals() and plot_output is not None else []
+
+    def analysis_table_in_scope(analysis_key, analysis_table) -> bool:
+        if not isinstance(analysis_table, pd.DataFrame):
+            return False
+        spec = analysis_table.attrs.get("analysis_spec", {})
+        spec_tests = spec.get("selected_tests", [spec.get("test_id")])
+        in_scope = bool(
+            spec.get("dataset") == dataset_key
+            and spec.get("revision") == st.session_state.revision
+            and spec.get("correction_mode") == correction_mode
+            and set(filter(None, spec_tests)).issubset(set(selected_tests))
+        )
+        if not in_scope or not str(analysis_key).startswith("E:"):
+            return in_scope
+        test_id = spec.get("test_id")
+        context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{test_id}"
+        return st.session_state.e_latest.get(context) == analysis_key
+
+    analysis_specs_for_provenance = []
+    for analysis_key, analysis_table in st.session_state.analysis_tables.items():
+        if analysis_table_in_scope(analysis_key, analysis_table):
+            analysis_specs_for_provenance.append(
+                {
+                    "key": analysis_key,
+                    "spec": analysis_table.attrs.get("analysis_spec", {}),
+                }
+            )
+    processing_config = {
+        "import": input_context["provenance_config"],
+        "manual_draft_sha256": input_context.get("manual_draft_sha256"),
+        "manual_audit_event_count": len(
+            input_context.get("manual_audit_events") or []
+        ),
+        "revision": st.session_state.revision,
+        "correction_mode": correction_mode,
+        "seating_offsets_mm": st.session_state.seating_offsets,
+        "manual_overrides": st.session_state.manual_overrides,
+        "selected_tests": sorted(selected_tests),
+        "graph": locals().get("export_spec"),
+        "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
+        "analysis_specs": analysis_specs_for_provenance,
+        "target_pressure_kPa": float(target_p),
+        "target_settlement_mm": float(target_s),
+        "stabilization_rate_mm_min": float(rate),
+        "audit_decisions": [
+            {
+                key: value
+                for key, value in event.items()
+                if key not in {"event_id", "timestamp_utc"}
+            }
+            for event in st.session_state.audit.events
+        ],
+    }
+    processing_config_key = value_sha256(processing_config)
+    if "processing_provenance" not in st.session_state:
+        st.session_state.processing_provenance = {}
+    if processing_config_key not in st.session_state.processing_provenance:
+        st.session_state.processing_provenance[processing_config_key] = build_provenance(
+            input_source=input_context["source_file_bytes"],
+            metadata_source=input_context["metadata_file_bytes"],
+            config=processing_config,
+            project_root=BASE_DIR,
+        )
+    processing_provenance = st.session_state.processing_provenance[processing_config_key]
+    report_prepared = filtered.copy(deep=False)
+    report_prepared.attrs["indicator_processing_audit"] = (
+        selected_indicator_audit.to_dict(orient="records")
+    )
+    report_prepared.attrs["indicator_processing_events"] = (
+        selected_indicator_events.to_dict(orient="records")
+    )
+    report_prepared.attrs["indicator_calibration_parameters"] = (
+        selected_indicator_passports.to_dict(orient="records")
+    )
+    report = build_markdown_report(
+        metadata=metadata,
+        prepared=report_prepared,
+        validation_issues=all_issues,
+        failures=failures[failures["test_id"].isin(selected_tests)],
+        pcr_results=pcr_by_test,
+        moduli=report_moduli,
+        figure_caption=current_caption,
+        plot_warnings=current_warnings,
+        audit=st.session_state.audit,
+        provenance=processing_provenance,
+        passport_status=passport_completeness(metadata, selected_tests),
+        import_info=import_info,
+        source_test_ids=raw["test_id"].dropna().astype(str).unique().tolist(),
+        source_row_count=len(raw),
+    )
+    st.subheader("–û—Ç—á—ë—Ç")
+    st.markdown(report)
+    st.download_button("–°–∫–∞—á–∞—Ç—å –æ—Ç—á—ë—Ç Markdown", report.encode("utf-8"), "soil_stamp_report_ru.md", "text/markdown")
+
+    result_tables = {
+        "failure_summary": failures[failures["test_id"].isin(selected_tests)],
+        "audit": st.session_state.audit.to_frame(),
+        "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
+        "derivatives": derivatives,
+        "settlement_at_target_pressure": settlement_at_target,
+        "pressure_at_target_settlement": pressure_at_target,
+        "deformation_work": work_table,
+        "hysteresis": hysteresis,
+        "stabilization": stabilization,
+        "center_and_tilt": tilt,
+        "validation_issues": [item.to_dict() for item in all_issues],
+        "provenance": processing_provenance.to_dict(),
+        "conversion_parameters": pd.DataFrame(
+            effective_conversion_parameters(metadata, selected_tests)
+        ),
+        "indicator_processing_audit": selected_indicator_audit,
+        "indicator_processing_events": selected_indicator_events,
+        "indicator_calibration_parameters": selected_indicator_passports,
+    }
+    manual_draft_payload = input_context.get("manual_draft")
+    if isinstance(manual_draft_payload, dict):
+        result_tables["manual_primary_rows"] = pd.DataFrame(
+            manual_draft_payload.get("rows") or []
+        )
+        result_tables["manual_entry_audit"] = pd.DataFrame(
+            input_context.get("manual_audit_events") or []
+        )
+        result_tables["manual_draft_manifest"] = {
+            "schema_version": manual_draft_payload.get("schema_version"),
+            "draft_id": manual_draft_payload.get("draft_id"),
+            "draft_sha256": input_context.get("manual_draft_sha256"),
+            "source_type": "manual",
+        }
+    analysis_manifest = {}
+    for name, table in st.session_state.analysis_tables.items():
+        spec = table.attrs.get("analysis_spec", {}) if isinstance(table, pd.DataFrame) else {}
+        if analysis_table_in_scope(name, table):
+            safe_name = hashlib.sha1(name.encode()).hexdigest()[:10]
+            result_tables[f"analysis_{safe_name}"] = table
+            analysis_manifest[f"analysis_{safe_name}"] = spec
+    result_tables["analysis_manifest"] = analysis_manifest
+    bundle_spec = {
+        "dataset": dataset_key,
+        "revision": st.session_state.revision,
+        "correction_mode": correction_mode,
+        "tests": selected_tests,
+        "caption": current_caption,
+        "graph": locals().get("export_spec"),
+        "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
+        "analysis_manifest": analysis_manifest,
+        "target_pressure_kPa": float(target_p),
+        "target_settlement_mm": float(target_s),
+        "stabilization_rate_mm_min": float(rate),
+        "audit_events": len(st.session_state.audit.events),
+        "provenance_config_sha256": processing_provenance.config_sha256,
+    }
+    bundle_key = hashlib.sha1(
+        json.dumps(bundle_spec, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    if st.button("–°–æ–±—Ä–∞—Ç—å –ø–∞–∫–µ—Ç –≤–æ—Å–ø—Ä–æ–∏–∑–≤–æ–¥–∏–º–æ—Å—Ç–∏", key="prepare_bundle", type="primary"):
+        with st.spinner("–§–æ—Ä–º–∏—Ä–æ–≤–∞–Ω–∏–µ ZIP —Å –¥–∞–Ω–Ω—ã–º–∏, —Ä–µ–∑—É–ª—å—Ç–∞—Ç–∞–º–∏ –∏ —Ä–∏—Å—É–Ω–∫–∞–º–∏‚Ä¶"):
+            figure_payloads = {}
+            if "plot_output" in locals() and plot_output is not None:
+                graph_exports = st.session_state.figure_exports.get(
+                    locals().get("export_key", ""), {}
+                )
+                if not graph_exports:
+                    graph_exports = {
+                        "svg": export_figure(plot_output.figure, "svg"),
+                        "pdf": export_figure(plot_output.figure, "pdf"),
+                        "png": export_figure(plot_output.figure, "png"),
+                    }
+                figure_payloads = {
+                    "current.svg": graph_exports["svg"],
+                    "current.pdf": graph_exports["pdf"],
+                    "current_600dpi.png": graph_exports["png"],
+                }
+            st.session_state.bundle_cache[bundle_key] = reproducibility_bundle(
+                raw=raw,
+                prepared=filtered,
+                metadata=metadata,
+                audit=st.session_state.audit,
+                report_markdown=report,
+                result_tables=result_tables,
+                figures=figure_payloads,
+                run_parameters={
+                    "dataset_sha256": dataset_key,
+                    "revision": st.session_state.revision,
+                    "correction_mode": correction_mode,
+                    "selected_tests": selected_tests,
+                    "graph": locals().get("export_spec"),
+                    "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
+                    "analysis_manifest": analysis_manifest,
+                    "target_pressure_kPa": float(target_p),
+                    "target_settlement_mm": float(target_s),
+                    "stabilization_rate_mm_min": float(rate),
+                },
+                provenance=processing_provenance,
+                raw_cells=input_context["raw_cells"],
+                import_issues=all_issues,
+                source_file_name=input_context["source_file_name"],
+                source_file_bytes=input_context["source_file_bytes"],
+                metadata_file_name=input_context["metadata_file_name"],
+                metadata_file_bytes=input_context["metadata_file_bytes"],
+                config_snapshot=processing_config,
+                scope={
+                    "source_test_ids": raw["test_id"].dropna().astype(str).unique().tolist(),
+                    "selected_test_ids": sorted(selected_tests),
+                    "excluded_test_ids": sorted(set(raw["test_id"].dropna().astype(str)) - set(selected_tests)),
+                    "source_rows": len(raw),
+                    "prepared_rows": len(filtered),
+                },
+            )
+    cached_bundle = st.session_state.bundle_cache.get(bundle_key)
+    if cached_bundle:
+        st.download_button(
+            "–°–∫–∞—á–∞—Ç—å –ø–∞–∫–µ—Ç –≤–æ—Å–ø—Ä–æ–∏–∑–≤–æ–¥–∏–º–æ—Å—Ç–∏ ZIP",
+            cached_bundle,
+            "soil_stamp_reproducibility.zip",
+            "application/zip",
+        )
+    st.subheader("Audit trail")
+    audit_frame = st.session_state.audit.to_frame()
+    if audit_frame.empty:
+        st.info("–†—É—á–Ω—ã—Ö —Ä–µ—à–µ–Ω–∏–π –ø–æ–∫–∞ –Ω–µ—Ç.")
+    else:
+        st.dataframe(audit_frame, width="stretch", hide_index=True)
+        st.download_button(
+            "–°–∫–∞—á–∞—Ç—å audit JSON",
+            st.session_state.audit.to_json().encode("utf-8"),
+            "audit.json",
+            "application/json",
+        )
+
+if "plot_output" in locals() and plot_output is not None:
+    plt.close(plot_output.figure)
