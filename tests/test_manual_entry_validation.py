@@ -114,9 +114,37 @@ def test_reinforcement_fields_are_conditional() -> None:
 
     codes = _codes(draft)
 
-    assert "missing_manual_passport_field" in codes
+    assert "missing_manual_passport_field" not in codes
     assert "missing_manual_reinforcement_field" in codes
     assert "invalid_manual_reinforcement_layers" in codes
+
+
+def test_baseline_group_and_pair_id_are_optional_for_a_standalone_test() -> None:
+    draft = _valid_draft()
+    draft.passport.baseline_group = ""
+    draft.passport.pair_id = None
+
+    result = validate_manual_draft(draft)
+
+    assert result.can_analyze
+    assert not any(
+        issue.column in {"baseline_group", "pair_id"}
+        and bool(issue.blocks_processing)
+        for issue in result.issues
+    )
+
+
+def test_pair_id_edge_whitespace_is_preserved_and_reported() -> None:
+    draft = _valid_draft()
+    draft.passport.pair_id = " P1 "
+
+    result = validate_manual_draft(draft)
+    issue = next(item for item in result.issues if item.code == "noncanonical_manual_pair_id")
+
+    assert result.can_analyze
+    assert issue.level == "warning"
+    assert issue.column == "pair_id"
+    assert issue.raw_value == " P1 "
 
 
 def test_sequence_uuid_and_time_order_are_blocking_and_rows_are_addressable() -> None:

@@ -1589,6 +1589,18 @@ with tabs[4]:
         comparison = st.session_state.analysis_tables.get(comparison_key)
         if comparison is not None:
             st.dataframe(comparison, width="stretch", hide_index=True)
+            pairing_warnings: list[str] = []
+            if "pairing_warning" in comparison:
+                pairing_warnings.extend(
+                    str(value).strip()
+                    for value in comparison["pairing_warning"].dropna().unique()
+                    if str(value).strip()
+                )
+            attr_warning = comparison.attrs.get("pairing_warning")
+            if attr_warning is not None and str(attr_warning).strip():
+                pairing_warnings.append(str(attr_warning).strip())
+            for warning in dict.fromkeys(pairing_warnings):
+                st.warning(warning)
             fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.2), sharex=True, constrained_layout=True)
             axes[0].plot(comparison["p_kPa"], comparison["k_s"], color="black", marker="o", markerfacecolor="white")
             axes[0].fill_between(
@@ -1692,6 +1704,7 @@ with tabs[6]:
         return st.session_state.e_latest.get(context) == analysis_key
 
     analysis_specs_for_provenance = []
+    report_group_comparisons = []
     for analysis_key, analysis_table in st.session_state.analysis_tables.items():
         if analysis_table_in_scope(analysis_key, analysis_table):
             analysis_specs_for_provenance.append(
@@ -1700,6 +1713,8 @@ with tabs[6]:
                     "spec": analysis_table.attrs.get("analysis_spec", {}),
                 }
             )
+            if str(analysis_key).startswith("CMP:"):
+                report_group_comparisons.append(analysis_table)
     processing_config = {
         "import": input_context["provenance_config"],
         "manual_draft_sha256": input_context.get("manual_draft_sha256"),
@@ -1754,6 +1769,7 @@ with tabs[6]:
         failures=failures[failures["test_id"].isin(selected_tests)],
         pcr_results=pcr_by_test,
         moduli=report_moduli,
+        group_comparisons=report_group_comparisons,
         figure_caption=current_caption,
         plot_warnings=current_warnings,
         audit=st.session_state.audit,

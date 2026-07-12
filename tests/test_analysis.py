@@ -15,6 +15,7 @@ from soilstamp.analysis import (
     fit_segmented_pcr,
     group_mean_curve,
     hysteresis_metrics,
+    resolve_pairing_design,
 )
 from soilstamp.data import AuditTrail, prepare_measurements as _prepare_measurements
 
@@ -148,10 +149,45 @@ def test_group_comparison_preserves_pairs_for_bootstrap_and_permutation() -> Non
         pd.concat(frames, ignore_index=True), "baseline", "reinforced", bootstrap=100, seed=9
     )
     assert set(result["analysis_design"]) == {"paired"}
+    assert set(result["pairing_status"]) == {"paired_validated"}
+    assert set(result["pairing_reason"]) == {"complete_pairing"}
+    assert set(result["pairing_warning"]) == {""}
+    assert set(result["pair_ids_used"]) == {"P1,P2"}
     assert set(result["n_pairs"]) == {2}
     assert result["permutation_p"].between(0, 1).all()
     assert result["permutation_p_fdr_bh"].between(0, 1).all()
     assert (result["delta_s_mm"] > 0).all()
+
+
+def test_paired_comparison_uses_the_same_pairs_at_each_pressure_level() -> None:
+    frames = [
+        _prepared_curve(
+            "B1", np.array([0.0, 100.0]), np.array([0.0, 2.0]), "baseline"
+        ).assign(pair_id="P1"),
+        _prepared_curve(
+            "R1", np.array([0.0, 100.0]), np.array([0.0, 1.0]), "reinforced"
+        ).assign(pair_id="P1"),
+        _prepared_curve(
+            "B2", np.array([0.0, 50.0]), np.array([0.0, 0.8]), "baseline"
+        ).assign(pair_id="P2"),
+        _prepared_curve(
+            "R2", np.array([0.0, 100.0]), np.array([0.0, 1.2]), "reinforced"
+        ).assign(pair_id="P2"),
+    ]
+
+    result = compare_groups(
+        pd.concat(frames, ignore_index=True),
+        "baseline",
+        "reinforced",
+        bootstrap=30,
+    )
+    at_100 = result.loc[np.isclose(result["p_kPa"], 100.0)].iloc[0]
+
+    assert at_100["analysis_design"] == "paired"
+    assert at_100["n_baseline"] == at_100["n_reinforced"] == at_100["n_pairs"] == 1
+    assert at_100["s_baseline_mm"] == pytest.approx(2.0)
+    assert at_100["s_reinforced_mm"] == pytest.approx(1.0)
+    assert at_100["delta_s_mm"] == pytest.approx(1.0)
 
 
 def test_partial_pairing_does_not_drop_unpaired_tests() -> None:
@@ -163,8 +199,160 @@ def test_partial_pairing_does_not_drop_unpaired_tests() -> None:
     ]
     result = compare_groups(pd.concat(frames, ignore_index=True), "baseline", "reinforced", bootstrap=30)
     assert set(result["analysis_design"]) == {"independent"}
+    assert set(result["pairing_status"]) == {"independent_fallback"}
+    assert result["pairing_reason"].str.contains("missing_pair_id").all()
+    assert result["pairing_warning"].str.contains("independent analysis").all()
     assert set(result["n_baseline"]) == {2}
     assert set(result["n_reinforced"]) == {2}
+
+
+def test_baseline_group_name_never_implies_pairing_without_pair_id() -> None:
+    frames = [
+        _prepared_curve("B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline"),
+        _prepared_curve("B2", np.array([0.0, 100.0]), np.array([0.3, 2.3]), "baseline"),
+        _prepared_curve("R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced"),
+        _prepared_curve("R2", np.array([0.0, 100.0]), np.array([0.2, 1.4]), "reinforced"),
+    ]
+    frame = pd.concat(frames, ignore_index=True).assign(baseline_group="baseline")
+
+    result = compare_groups(frame, "baseline", "reinforced", bootstrap=30)
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains("missing_pair_id").all()
+    assert set(result["n_baseline"]) == {2}
+    assert set(result["n_reinforced"]) == {2}
+
+
+def test_whitespace_pair_id_is_missing_and_forces_independent_fallback() -> None:
+    frames = [
+        _prepared_curve("B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline").assign(pair_id=" P1 "),
+        _prepared_curve("B2", np.array([0.0, 100.0]), np.array([0.3, 2.3]), "baseline").assign(pair_id="   "),
+        _prepared_curve("R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced").assign(pair_id="P1"),
+        _prepared_curve("R2", np.array([0.0, 100.0]), np.array([0.2, 1.4]), "reinforced").assign(pair_id="P2"),
+    ]
+
+    result = compare_groups(pd.concat(frames, ignore_index=True), "baseline", "reinforced", bootstrap=30)
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains("noncanonical_pair_id:baseline:B1").all()
+    assert result["pairing_reason"].str.contains("missing_pair_id:baseline:B2").all()
+    assert result["pairing_reason"].str.contains("incomplete_pair_set").all()
+
+
+def test_pair_id_edge_whitespace_is_not_silently_normalized_into_a_pair() -> None:
+    frames = [
+        _prepared_curve(
+            "B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline"
+        ).assign(pair_id=" P1 "),
+        _prepared_curve(
+            "R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced"
+        ).assign(pair_id="P1"),
+    ]
+
+    result = compare_groups(
+        pd.concat(frames, ignore_index=True),
+        "baseline",
+        "reinforced",
+        bootstrap=30,
+    )
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains(
+        "noncanonical_pair_id:baseline:B1"
+    ).all()
+    assert result["pairing_warning"].str.len().gt(0).all()
+
+
+def test_duplicate_pair_id_within_group_forces_independent_fallback() -> None:
+    frames = [
+        _prepared_curve("B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline").assign(pair_id="P1"),
+        _prepared_curve("B2", np.array([0.0, 100.0]), np.array([0.3, 2.3]), "baseline").assign(pair_id="P1"),
+        _prepared_curve("R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced").assign(pair_id="P1"),
+        _prepared_curve("R2", np.array([0.0, 100.0]), np.array([0.2, 1.4]), "reinforced").assign(pair_id="P2"),
+    ]
+
+    result = compare_groups(pd.concat(frames, ignore_index=True), "baseline", "reinforced", bootstrap=30)
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains(
+        "duplicate_pair_id_within_group:baseline:P1"
+    ).all()
+    assert set(result["n_baseline"]) == {2}
+    assert set(result["n_reinforced"]) == {2}
+
+
+def test_nonanalyzable_duplicate_pair_cannot_disappear_before_pairing_check() -> None:
+    valid_baseline = _prepared_curve(
+        "B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline"
+    ).assign(pair_id="P1")
+    invalid_baseline = _prepared_curve(
+        "B2", np.array([0.0, 100.0]), np.array([0.3, 2.3]), "baseline"
+    ).assign(pair_id="P1", settlement_mm=np.nan)
+    reinforced = _prepared_curve(
+        "R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced"
+    ).assign(pair_id="P1")
+
+    result = compare_groups(
+        pd.concat([valid_baseline, invalid_baseline, reinforced], ignore_index=True),
+        "baseline",
+        "reinforced",
+        bootstrap=30,
+    )
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains(
+        "duplicate_pair_id_within_group:baseline:P1"
+    ).all()
+    assert result["pairing_reason"].str.contains(
+        "missing_analyzable_curve:baseline:B2"
+    ).all()
+    assert set(result["n_baseline"]) == {1}
+    assert set(result["n_reinforced"]) == {1}
+
+
+def test_same_test_id_cannot_be_used_in_both_groups() -> None:
+    baseline = _prepared_curve(
+        "T-SAME", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline"
+    ).assign(pair_id="P1")
+    reinforced = _prepared_curve(
+        "T-SAME", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced"
+    ).assign(pair_id="P1")
+
+    resolution = resolve_pairing_design(baseline, reinforced)
+    assert resolution.analysis_design == "independent"
+    assert "overlapping_test_id:T-SAME" in resolution.pairing_reason
+
+    with pytest.raises(ValueError, match="test_id.*обе"):
+        compare_groups(
+            pd.concat([baseline, reinforced], ignore_index=True),
+            "baseline",
+            "reinforced",
+            bootstrap=30,
+        )
+
+
+def test_group_comparison_rejects_self_comparison() -> None:
+    frame = _prepared_curve(
+        "T1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline"
+    ).assign(pair_id="P1")
+
+    with pytest.raises(ValueError, match="две разные группы"):
+        compare_groups(frame, "baseline", "baseline", bootstrap=30)
+
+
+def test_incomplete_pair_set_forces_independent_fallback() -> None:
+    frames = [
+        _prepared_curve("B1", np.array([0.0, 100.0]), np.array([0.2, 2.0]), "baseline").assign(pair_id="P1"),
+        _prepared_curve("B2", np.array([0.0, 100.0]), np.array([0.3, 2.3]), "baseline").assign(pair_id="P2"),
+        _prepared_curve("R1", np.array([0.0, 100.0]), np.array([0.1, 1.2]), "reinforced").assign(pair_id="P1"),
+        _prepared_curve("R2", np.array([0.0, 100.0]), np.array([0.2, 1.4]), "reinforced").assign(pair_id="P3"),
+    ]
+
+    result = compare_groups(pd.concat(frames, ignore_index=True), "baseline", "reinforced", bootstrap=30)
+
+    assert set(result["analysis_design"]) == {"independent"}
+    assert result["pairing_reason"].str.contains("incomplete_pair_set").all()
+    assert result["pairing_warning"].str.len().gt(0).all()
 
 
 def test_derivative_does_not_bridge_unloading_to_reloading() -> None:

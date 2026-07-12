@@ -7,7 +7,7 @@ analysis runs deterministic for a fixed random seed and suitable for tests.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -800,22 +800,167 @@ def _bootstrap_interval(samples: list[np.ndarray], columns: int) -> tuple[np.nda
     return low, high
 
 
-def _pair_mapping(group_frame: pd.DataFrame) -> dict[str, str]:
+@dataclass(frozen=True, slots=True)
+class PairingResolution:
+    """Auditable decision between paired and independent group analysis."""
+
+    analysis_design: str
+    pairing_status: str
+    pairing_reason: str
+    pairing_warning: str
+    pair_ids: tuple[str, ...]
+    baseline_test_by_pair: dict[str, str]
+    reinforced_test_by_pair: dict[str, str]
+
+
+def _independent_pairing_resolution(issues: Iterable[str]) -> PairingResolution:
+    unique_issues = tuple(dict.fromkeys(str(issue) for issue in issues if str(issue)))
+    reason = ";".join(unique_issues or ("missing_pair_id:both_groups",))
+    warning = (
+        "Парный дизайн не подтверждён "
+        f"({reason}). Выполнен independent analysis по всем анализируемым кривым; "
+        "частичный отбор пар не применялся."
+    )
+    return PairingResolution(
+        analysis_design="independent",
+        pairing_status="independent_fallback",
+        pairing_reason=reason,
+        pairing_warning=warning,
+        pair_ids=(),
+        baseline_test_by_pair={},
+        reinforced_test_by_pair={},
+    )
+
+
+def _explicit_pair_id(value: Any) -> tuple[str | None, bool]:
+    """Return the stored ID and whether it contains unapproved edge whitespace."""
+
+    if pd.isna(value):
+        return None, False
+    explicit = str(value)
+    stripped = explicit.strip()
+    if not stripped:
+        return None, False
+    return explicit, explicit != stripped
+
+
+def _pair_assignments(
+    group_frame: pd.DataFrame,
+    test_ids: Iterable[str],
+    *,
+    group_role: str,
+) -> tuple[dict[str, str], list[str]]:
+    """Return pair->test assignments and deterministic validation issue codes."""
+
+    expected = tuple(dict.fromkeys(str(value) for value in test_ids))
+    assignments_by_test: dict[str, str] = {}
+    issues: list[str] = []
     if "pair_id" not in group_frame:
-        return {}
-    unique = group_frame[["test_id", "pair_id"]].dropna().drop_duplicates()
-    mapping: dict[str, str] = {}
-    duplicated: set[str] = set()
-    for _, row in unique.iterrows():
-        pair = str(row["pair_id"])
-        test_id = str(row["test_id"])
-        if pair in mapping and mapping[pair] != test_id:
-            duplicated.add(pair)
-        else:
-            mapping[pair] = test_id
-    for pair in duplicated:
-        mapping.pop(pair, None)
-    return mapping
+        return {}, [f"missing_pair_id:{group_role}:{test_id}" for test_id in expected]
+
+    test_values = group_frame["test_id"].astype(str)
+    for test_id in expected:
+        values: set[str] = set()
+        has_noncanonical_value = False
+        for value in group_frame.loc[test_values == test_id, "pair_id"].tolist():
+            explicit, noncanonical = _explicit_pair_id(value)
+            has_noncanonical_value = has_noncanonical_value or noncanonical
+            if explicit is not None and not noncanonical:
+                values.add(explicit)
+        if has_noncanonical_value:
+            issues.append(f"noncanonical_pair_id:{group_role}:{test_id}")
+            continue
+        if not values:
+            issues.append(f"missing_pair_id:{group_role}:{test_id}")
+            continue
+        if len(values) > 1:
+            issues.append(f"conflicting_pair_id_within_test:{group_role}:{test_id}")
+            continue
+        assignments_by_test[test_id] = next(iter(values))
+
+    tests_by_pair: dict[str, list[str]] = {}
+    for test_id, pair_id in assignments_by_test.items():
+        tests_by_pair.setdefault(pair_id, []).append(test_id)
+    for pair_id, assigned_tests in sorted(tests_by_pair.items()):
+        if len(assigned_tests) > 1:
+            issues.append(f"duplicate_pair_id_within_group:{group_role}:{pair_id}")
+
+    valid = {
+        pair_id: assigned_tests[0]
+        for pair_id, assigned_tests in tests_by_pair.items()
+        if len(assigned_tests) == 1
+    }
+    return valid, issues
+
+
+def resolve_pairing_design(
+    baseline: pd.DataFrame,
+    reinforced: pd.DataFrame,
+    *,
+    baseline_test_ids: Iterable[str] | None = None,
+    reinforced_test_ids: Iterable[str] | None = None,
+) -> PairingResolution:
+    """Use pairing only when every analyzable test forms one unambiguous pair.
+
+    ``baseline_group`` is intentionally not accepted by this resolver and can
+    never be used as evidence of pairing. Missing, blank, conflicting,
+    duplicated, or incomplete ``pair_id`` assignments cause a lossless
+    independent-analysis fallback.
+    """
+
+    if baseline_test_ids is None:
+        baseline_test_ids = baseline["test_id"].dropna().astype(str).unique().tolist()
+    if reinforced_test_ids is None:
+        reinforced_test_ids = reinforced["test_id"].dropna().astype(str).unique().tolist()
+    baseline_ids = tuple(dict.fromkeys(str(value) for value in baseline_test_ids))
+    reinforced_ids = tuple(dict.fromkeys(str(value) for value in reinforced_test_ids))
+
+    baseline_pairs, baseline_issues = _pair_assignments(
+        baseline,
+        baseline_ids,
+        group_role="baseline",
+    )
+    reinforced_pairs, reinforced_issues = _pair_assignments(
+        reinforced,
+        reinforced_ids,
+        group_role="reinforced",
+    )
+    overlapping_test_ids = sorted(set(baseline_ids) & set(reinforced_ids))
+    issues = [
+        *(f"overlapping_test_id:{test_id}" for test_id in overlapping_test_ids),
+        *baseline_issues,
+        *reinforced_issues,
+    ]
+    baseline_pair_ids = set(baseline_pairs)
+    reinforced_pair_ids = set(reinforced_pairs)
+    if baseline_pair_ids != reinforced_pair_ids:
+        missing_reinforced = sorted(baseline_pair_ids - reinforced_pair_ids)
+        missing_baseline = sorted(reinforced_pair_ids - baseline_pair_ids)
+        details = ",".join(
+            [
+                *(f"reinforced:{pair_id}" for pair_id in missing_reinforced),
+                *(f"baseline:{pair_id}" for pair_id in missing_baseline),
+            ]
+        )
+        issues.append(f"incomplete_pair_set:{details}")
+
+    complete = bool(baseline_pair_ids) and not issues and (
+        len(baseline_pairs) == len(baseline_ids)
+        and len(reinforced_pairs) == len(reinforced_ids)
+    )
+    if complete:
+        pair_ids = tuple(sorted(baseline_pair_ids))
+        return PairingResolution(
+            analysis_design="paired",
+            pairing_status="paired_validated",
+            pairing_reason="complete_pairing",
+            pairing_warning="",
+            pair_ids=pair_ids,
+            baseline_test_by_pair={pair_id: baseline_pairs[pair_id] for pair_id in pair_ids},
+            reinforced_test_by_pair={pair_id: reinforced_pairs[pair_id] for pair_id in pair_ids},
+        )
+
+    return _independent_pairing_resolution(issues)
 
 
 def compare_groups(
@@ -830,30 +975,51 @@ def compare_groups(
 
     if "group" not in frame:
         raise ValueError("Для сравнения нужен столбец group.")
+    if str(baseline_group) == str(reinforced_group):
+        raise ValueError("Для сравнения нужно выбрать две разные группы.")
     baseline = frame[frame["group"].astype(str) == str(baseline_group)]
     reinforced = frame[frame["group"].astype(str) == str(reinforced_group)]
+    baseline_test_ids = baseline["test_id"].dropna().astype(str).unique().tolist()
+    reinforced_test_ids = reinforced["test_id"].dropna().astype(str).unique().tolist()
+    overlapping_test_ids = sorted(set(baseline_test_ids) & set(reinforced_test_ids))
+    if overlapping_test_ids:
+        rendered = ", ".join(overlapping_test_ids)
+        raise ValueError(
+            "Один test_id не может одновременно входить в обе сравниваемые группы: "
+            f"{rendered}."
+        )
     base_curves = _test_curves(baseline)
     reinf_curves = _test_curves(reinforced)
     if not base_curves or not reinf_curves:
         raise ValueError("В каждой сравниваемой группе нужна хотя бы одна кривая.")
-    base_pairs = _pair_mapping(baseline)
-    reinf_pairs = _pair_mapping(reinforced)
-    common_pairs = [pair for pair in base_pairs if pair in reinf_pairs]
-    paired = bool(common_pairs) and (
-        len(common_pairs) == len(base_curves) == len(reinf_curves)
-        and len(base_pairs) == len(base_curves)
-        and len(reinf_pairs) == len(reinf_curves)
+    pairing = resolve_pairing_design(
+        baseline,
+        reinforced,
+        baseline_test_ids=baseline_test_ids,
+        reinforced_test_ids=reinforced_test_ids,
     )
+    missing_curve_issues = [
+        *(f"missing_analyzable_curve:baseline:{test_id}" for test_id in baseline_test_ids if test_id not in base_curves),
+        *(f"missing_analyzable_curve:reinforced:{test_id}" for test_id in reinforced_test_ids if test_id not in reinf_curves),
+    ]
+    if missing_curve_issues:
+        existing_issues = (
+            []
+            if pairing.analysis_design == "paired"
+            else pairing.pairing_reason.split(";")
+        )
+        pairing = _independent_pairing_resolution([*existing_issues, *missing_curve_issues])
+    paired = pairing.analysis_design == "paired"
+    common_pairs = list(pairing.pair_ids)
     if paired:
         base_curves_used = {
-            pair: base_curves[base_pairs[pair]]
+            pair: base_curves[pairing.baseline_test_by_pair[pair]]
             for pair in common_pairs
-            if base_pairs[pair] in base_curves and reinf_pairs[pair] in reinf_curves
         }
-        common_pairs = list(base_curves_used)
-        reinf_curves_used = {pair: reinf_curves[reinf_pairs[pair]] for pair in common_pairs}
-        if not common_pairs:
-            paired = False
+        reinf_curves_used = {
+            pair: reinf_curves[pairing.reinforced_test_by_pair[pair]]
+            for pair in common_pairs
+        }
     if not paired:
         base_curves_used = base_curves
         reinf_curves_used = reinf_curves
@@ -866,7 +1032,16 @@ def compare_groups(
         raise ValueError("У групп нет общей области давления.")
     _, base_matrix, _ = _curve_matrix(base_curves_used, grid, 1e-8)
     _, reinf_matrix, _ = _curve_matrix(reinf_curves_used, grid, 1e-8)
-    shared_support = np.isfinite(base_matrix).any(axis=0) & np.isfinite(reinf_matrix).any(axis=0)
+    if paired:
+        pairwise_finite = np.isfinite(base_matrix) & np.isfinite(reinf_matrix)
+        base_matrix = np.where(pairwise_finite, base_matrix, np.nan)
+        reinf_matrix = np.where(pairwise_finite, reinf_matrix, np.nan)
+        shared_support = pairwise_finite.any(axis=0)
+    else:
+        shared_support = (
+            np.isfinite(base_matrix).any(axis=0)
+            & np.isfinite(reinf_matrix).any(axis=0)
+        )
     grid = grid[shared_support]
     base_matrix = base_matrix[:, shared_support]
     reinf_matrix = reinf_matrix[:, shared_support]
@@ -1020,6 +1195,10 @@ def compare_groups(
             "n_reinforced": n_reinf_at,
             "n_pairs": n_pairs_at,
             "analysis_design": "paired" if paired else "independent",
+            "pairing_status": pairing.pairing_status,
+            "pairing_reason": pairing.pairing_reason,
+            "pairing_warning": pairing.pairing_warning,
+            "pair_ids_used": ",".join(pairing.pair_ids) if paired else "",
             "effect_size": effect_size,
             "effect_size_name": effect_name,
             "effect_size_ci_low": effect_low,

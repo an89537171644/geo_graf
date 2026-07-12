@@ -238,6 +238,13 @@ def passport_completeness(
             if isinstance(values, dict) and values.get("pair_id")
         }
     ) if isinstance(tests, dict) else []
+    test_baseline_groups = sorted(
+        {
+            str(values.get("baseline_group"))
+            for values in tests.values()
+            if isinstance(values, dict) and values.get("baseline_group")
+        }
+    ) if isinstance(tests, dict) else []
     geometry = metadata.get("stamp_diameter_mm") or metadata.get("stamp_area_m2")
     values = {
         "project_id": passport.get("project_id") or metadata.get("project_id"),
@@ -245,7 +252,11 @@ def passport_completeness(
         "reinforcement_status": passport.get("reinforcement_status")
         or (reinforcement.get("type") if isinstance(reinforcement, dict) else None)
         or (sorted({str(item.get('type')) for item in test_reinforcement.values() if isinstance(item, dict) and item.get('type')}) or None),
-        "pair_id": passport.get("pair_id") or metadata.get("pair_id") or test_pairs,
+        "baseline_group": passport.get("baseline_group")
+        or metadata.get("baseline_group")
+        or test_baseline_groups
+        or None,
+        "pair_id": passport.get("pair_id") or metadata.get("pair_id") or test_pairs or None,
         "soil_batch": passport.get("soil_batch") or metadata.get("soil_batch") or soil.get("batch"),
         "experiment_date": passport.get("experiment_date") or metadata.get("experiment_date"),
         "operator": passport.get("operator") or metadata.get("operator"),
@@ -270,10 +281,15 @@ def passport_completeness(
             else metadata.get("instruments")
         ),
     }
-    missing = [name for name, value in values.items() if not _present(value)]
+    optional = {"baseline_group", "pair_id"}
+    missing = [
+        name
+        for name, value in values.items()
+        if name not in optional and not _present(value)
+    ]
     return {
         "complete": not missing,
-        "provided": [name for name in values if name not in missing],
+        "provided": [name for name, value in values.items() if _present(value)],
         "missing": missing,
         "fields": values,
     }

@@ -224,7 +224,6 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
         "operator",
         "laboratory_or_site",
         "group_name",
-        "baseline_group",
         "soil_type",
         "soil_batch",
         "reinforcement_type",
@@ -243,6 +242,22 @@ def _validate_passport(draft: ManualDraft) -> list[ValidationIssue]:
                 "missing_manual_test_id",
                 "Заполните test_name или archive_number.",
                 column="test_name/archive_number",
+            )
+        )
+    if (
+        isinstance(passport.pair_id, str)
+        and passport.pair_id
+        and passport.pair_id != passport.pair_id.strip()
+    ):
+        issues.append(
+            _passport_issue(
+                draft,
+                "noncanonical_manual_pair_id",
+                "ID пары содержит пробелы по краям и не будет использоваться как "
+                "подтверждение парного дизайна.",
+                column="pair_id",
+                raw_value=passport.pair_id,
+                level="warning",
             )
         )
 

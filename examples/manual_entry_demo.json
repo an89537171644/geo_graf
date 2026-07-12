@@ -1,5 +1,5 @@
 {
-  "schema_version": "manual-entry-draft/1.0",
+  "schema_version": "manual-entry-draft/1.1",
   "draft_id": "10e21882-1fac-4ea5-a614-1a7c41f15d5c",
   "status": "draft",
   "created_by": "engineer-demo",
@@ -18,6 +18,7 @@
     "group_name": "baseline",
     "is_reinforced": false,
     "baseline_group": "baseline",
+    "pair_id": null,
     "soil_type": "песок",
     "soil_batch": "demo-batch-01",
     "reinforcement_type": "none",

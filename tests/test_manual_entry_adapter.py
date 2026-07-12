@@ -104,6 +104,29 @@ def test_adapter_preserves_decimal_comma_uuid_and_manual_provenance() -> None:
     assert bundle.source_bytes == draft.to_json(indent=None).encode("utf-8")
 
 
+def test_adapter_never_infers_pair_id_from_baseline_group() -> None:
+    draft = _draft()
+    assert draft.passport.baseline_group == "baseline"
+    assert draft.passport.pair_id is None
+
+    unpaired = adapt_manual_draft(draft)
+    test_metadata = unpaired.metadata["tests"][draft.passport.test_id]
+    assert unpaired.metadata["baseline_group"] == "baseline"
+    assert test_metadata["baseline_group"] == "baseline"
+    assert unpaired.metadata["project_passport"]["baseline_group"] == "baseline"
+    assert unpaired.metadata["pair_id"] is None
+    assert test_metadata["pair_id"] is None
+    assert unpaired.metadata["project_passport"]["pair_id"] is None
+    assert unpaired.raw["pair_id"].isna().all()
+
+    draft.passport.pair_id = "PAIR-01"
+    paired = adapt_manual_draft(draft)
+    assert paired.metadata["pair_id"] == "PAIR-01"
+    assert paired.metadata["tests"][draft.passport.test_id]["pair_id"] == "PAIR-01"
+    assert paired.metadata["project_passport"]["pair_id"] == "PAIR-01"
+    assert paired.raw["pair_id"].eq("PAIR-01").all()
+
+
 def test_manual_source_loads_source_neutral_experiment_points() -> None:
     draft = _draft()
     draft.rows[1].stage_no = "01"

@@ -66,6 +66,23 @@ def test_passport_reports_missing_fields_instead_of_filling_them() -> None:
     assert "instruments_and_calibration" in status["missing"]
 
 
+def test_pair_and_baseline_are_distinct_optional_passport_fields() -> None:
+    status = passport_completeness(
+        {
+            "baseline_group": "control-series",
+            "pair_id": None,
+            "tests": {"T-01": {"baseline_group": "control-series"}},
+        }
+    )
+
+    assert status["fields"]["baseline_group"] == "control-series"
+    assert status["fields"]["pair_id"] is None
+    assert "baseline_group" in status["provided"]
+    assert "pair_id" not in status["provided"]
+    assert "baseline_group" not in status["missing"]
+    assert "pair_id" not in status["missing"]
+
+
 def test_passport_requires_instrument_id_and_calibration_reference() -> None:
     incomplete = passport_completeness(
         {"project_passport": {"instruments": [{"instrument_id": "IND-1"}]}}

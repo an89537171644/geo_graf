@@ -1,6 +1,7 @@
 """Soil Stamp Antonov — reproducible plate-load test analysis."""
 
 from .analysis import (
+    PairingResolution,
     calculate_moduli_for_test,
     compare_groups,
     deformation_work,
@@ -8,6 +9,7 @@ from .analysis import (
     fit_segmented_pcr,
     group_mean_curve,
     hysteresis_metrics,
+    resolve_pairing_design,
 )
 from .methodology import (
     ModulusMethodProfile,
@@ -42,11 +44,14 @@ from .manual_entry_adapter import (
     adapt_manual_draft,
 )
 from .manual_entry_models import (
+    MANUAL_DRAFT_SCHEMA_V1_0,
+    MANUAL_DRAFT_SCHEMA_VERSION,
     ManualAuditEvent,
     ManualDraft,
     ManualPassport,
     ManualPoint,
     ManualReinforcement,
+    migrate_manual_draft_payload,
 )
 from .manual_entry_validation import ManualValidationResult, validate_manual_draft
 from .sources import ExcelExperimentSource, ExperimentSource
@@ -81,6 +86,8 @@ __all__ = [
     "IndicatorPassport",
     "IndicatorProcessingResult",
     "ManualAuditEvent",
+    "MANUAL_DRAFT_SCHEMA_V1_0",
+    "MANUAL_DRAFT_SCHEMA_VERSION",
     "ManualDraft",
     "ManualExperimentSource",
     "ManualInputBundle",
@@ -88,9 +95,11 @@ __all__ = [
     "ManualPoint",
     "ManualReinforcement",
     "ManualValidationResult",
+    "migrate_manual_draft_payload",
     "ModulusMethodProfile",
     "ModulusOverrides",
     "ModulusResolution",
+    "PairingResolution",
     "failure_summary",
     "fit_segmented_pcr",
     "group_mean_curve",
@@ -117,6 +126,7 @@ __all__ = [
     "read_protocol",
     "read_protocol_excel",
     "resolve_indicator_passport",
+    "resolve_pairing_design",
     "resolve_modulus_method",
     "validate_measurements",
     "validate_manual_draft",

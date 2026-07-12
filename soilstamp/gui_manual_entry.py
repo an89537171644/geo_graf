@@ -182,11 +182,25 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
         protocol_type = c3.selectbox(
             "Тип протокола *", protocol_options, index=protocol_index
         )
-        group_name = c1.text_input("Группа *", value=passport.group_name)
+        group_name = c1.text_input("Группа опыта *", value=passport.group_name)
         baseline_group = c2.text_input(
-            "Базовая группа *", value=passport.baseline_group
+            "Контрольная группа (необязательно)",
+            value=passport.baseline_group,
+            help="Имя контрольной серии; оно не является идентификатором пары.",
         )
-        soil_type = c3.text_input("Тип грунта *", value=passport.soil_type)
+        pair_id = c3.text_input(
+            "ID пары / блока (необязательно)",
+            value=passport.pair_id or "",
+            help=(
+                "Одинаковый непустой ID задают только двум действительно сопоставленным "
+                "опытам. Из контрольной группы ID пары не выводится."
+            ),
+        )
+        st.caption(
+            "Контрольная группа и ID пары имеют разный смысл. Пустой ID пары означает, "
+            "что парность не заявлена."
+        )
+        soil_type = c1.text_input("Тип грунта *", value=passport.soil_type)
         soil_batch = c1.text_input("Партия грунта *", value=passport.soil_batch)
         is_reinforced = c2.checkbox(
             "Армированный грунт", value=passport.is_reinforced
@@ -357,6 +371,7 @@ def _passport_form(service: ManualEntryService, actor: str, *, key_prefix: str) 
                 "group_name": group_name,
                 "is_reinforced": is_reinforced,
                 "baseline_group": baseline_group,
+                "pair_id": pair_id if pair_id != "" else None,
                 "soil_type": soil_type,
                 "soil_batch": soil_batch,
                 "reinforcement_type": reinforcement_type,

@@ -174,6 +174,7 @@ def build_markdown_report(
     failures,
     pcr_results: dict[str, PCRResult] | None = None,
     moduli=None,
+    group_comparisons: list[Any] | None = None,
     figure_caption: str | None = None,
     plot_warnings: list[str] | None = None,
     audit: AuditTrail | None = None,
@@ -447,6 +448,28 @@ def build_markdown_report(
                 )
             methodology_note = _modulus_text(row.get("methodology_note"), "не указано")
             lines.append(f"  - методическое примечание: {methodology_note}")
+
+    if group_comparisons:
+        lines.extend(["", "## Сравнение групп", ""])
+        rendered_comparisons = 0
+        for comparison in group_comparisons:
+            if not isinstance(comparison, pandas.DataFrame) or comparison.empty:
+                continue
+            row = comparison.iloc[0]
+            baseline_group = row.get("baseline_group", "—")
+            reinforced_group = row.get("reinforced_group", "—")
+            pairing_status = row.get("pairing_status", "unknown")
+            pairing_reason = row.get("pairing_reason", "")
+            pairing_warning = row.get("pairing_warning", "")
+            lines.append(
+                f"- `{baseline_group}` vs `{reinforced_group}`: "
+                f"pairing_status=`{pairing_status}`; pairing_reason=`{pairing_reason or '—'}`."
+            )
+            if pandas.notna(pairing_warning) and str(pairing_warning).strip():
+                lines.append(f"  - Предупреждение: {str(pairing_warning).strip()}")
+            rendered_comparisons += 1
+        if rendered_comparisons == 0:
+            lines.append("- Таблицы сравнения групп отсутствуют.")
     if plot_warnings:
         lines.extend(["", "## Предупреждения графика", ""])
         lines.extend(f"- {warning}" for warning in plot_warnings)

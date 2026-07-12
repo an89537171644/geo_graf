@@ -5,13 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 
-MANUAL_DRAFT_SCHEMA_VERSION = "manual-entry-draft/1.0"
+MANUAL_DRAFT_SCHEMA_V1_0 = "manual-entry-draft/1.0"
+MANUAL_DRAFT_SCHEMA_VERSION = "manual-entry-draft/1.1"
 MAX_MANUAL_DRAFT_BYTES = 16 * 1024 * 1024
 MAX_MANUAL_DRAFT_ROWS = 100_000
 
@@ -115,6 +117,38 @@ def _require_json_value(value: Any, *, field_name: str) -> None:
     )
 
 
+def migrate_manual_draft_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a lossless copy upgraded to the current manual-draft schema.
+
+    Version 1.0 did not have an explicit ``pair_id``.  Its
+    ``baseline_group`` value is deliberately retained only as the name of the
+    control series and is never treated as evidence of pairing.
+    """
+
+    if not isinstance(payload, dict):
+        raise ValueError("Черновик должен быть JSON-объектом.")
+    migrated = deepcopy(payload)
+    version = migrated.get("schema_version")
+    if version == MANUAL_DRAFT_SCHEMA_VERSION:
+        return migrated
+    if version != MANUAL_DRAFT_SCHEMA_V1_0:
+        raise ValueError(
+            f"Неподдерживаемая версия черновика {version!r}; "
+            f"ожидается {MANUAL_DRAFT_SCHEMA_VERSION}."
+        )
+    passport = migrated.get("passport")
+    if not isinstance(passport, dict):
+        raise ValueError("Поле passport должно быть JSON-объектом.")
+    if "pair_id" in passport:
+        raise ValueError(
+            "passport.pair_id не входил в схему manual-entry-draft/1.0; "
+            "скрытая замена при миграции запрещена."
+        )
+    passport["pair_id"] = None
+    migrated["schema_version"] = MANUAL_DRAFT_SCHEMA_VERSION
+    return migrated
+
+
 @dataclass(slots=True)
 class ManualReinforcement:
     material: str = ""
@@ -190,6 +224,7 @@ class ManualPassport:
     group_name: str = ""
     is_reinforced: bool = False
     baseline_group: str = ""
+    pair_id: str | None = None
     soil_type: str = ""
     soil_batch: str = ""
     reinforcement_type: str = "none"
@@ -259,6 +294,7 @@ class ManualPassport:
             if not isinstance(payload[name], str):
                 raise ValueError(f"passport.{name} должен быть строкой.")
         optional_text_fields = (
+            "pair_id",
             "stamp_diameter_mm",
             "stamp_area_m2",
             "load_factor",
@@ -523,6 +559,7 @@ class ManualDraft:
     def from_dict(cls, payload: dict[str, Any]) -> "ManualDraft":
         if not isinstance(payload, dict):
             raise ValueError("Черновик должен быть JSON-объектом.")
+        payload = migrate_manual_draft_payload(payload)
         version = str(payload.get("schema_version") or "")
         if version != MANUAL_DRAFT_SCHEMA_VERSION:
             raise ValueError(

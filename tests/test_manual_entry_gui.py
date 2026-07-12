@@ -4,6 +4,8 @@ from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
+from soilstamp.gui_manual_entry import MANUAL_SERVICE_KEY
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANUAL_SOURCE = "Ввод вручную"
@@ -38,6 +40,9 @@ def test_manual_source_opens_without_excel_and_renders_four_zones() -> None:
         "3. Валидация",
         "4. Предварительный расчёт",
     ]
+    labels = {item.label for item in app.text_input}
+    assert "Контрольная группа (необязательно)" in labels
+    assert "ID пары / блока (необязательно)" in labels
 
 
 def test_invalid_manual_draft_can_be_downloaded_but_not_activated() -> None:
@@ -56,6 +61,29 @@ def test_invalid_manual_draft_can_be_downloaded_but_not_activated() -> None:
         "Исправьте критические ошибки" in str(item.value)
         for item in app.warning
     )
+
+
+def test_gui_preserves_literal_pair_id_for_auditable_validation() -> None:
+    app = _open_manual_entry()
+    pair_input = next(
+        item
+        for item in app.text_input
+        if item.label == "ID пары / блока (необязательно)"
+    )
+    pair_input.set_value(" P1 ")
+    _button(app, "Применить паспорт").click()
+    app.run(timeout=120)
+
+    assert not app.exception
+    service = app.session_state[MANUAL_SERVICE_KEY]
+    assert service.draft.passport.pair_id == " P1 "
+    matching_events = [
+        event
+        for event in service.draft.audit_events
+        if event.field == "pair_id"
+    ]
+    assert matching_events
+    assert matching_events[-1].new_value == " P1 "
 
 
 def test_valid_manual_demo_can_be_activated_in_common_pipeline() -> None:

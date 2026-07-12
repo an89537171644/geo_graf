@@ -52,6 +52,46 @@ def test_failure_interval_in_report_uses_decimal_comma() -> None:
     assert "1.25 < Fu" not in report
 
 
+def test_report_exposes_group_pairing_decision_and_fallback_warning() -> None:
+    metadata = {"stamp_area_m2": 0.1, "indicator_resolution_mm": 0.01}
+    raw = pd.DataFrame(
+        {
+            "test_id": ["B1", "R1"],
+            "stage": [1, 1],
+            "load": [1.0, 1.0],
+            "settlement": [0.2, 0.1],
+        }
+    )
+    prepared, issues = prepare_measurements(raw, metadata)
+    comparison = pd.DataFrame(
+        [
+            {
+                "baseline_group": "baseline",
+                "reinforced_group": "reinforced",
+                "pairing_status": "independent_fallback",
+                "pairing_reason": "missing_pair_id:both_groups",
+                "pairing_warning": (
+                    "Парный дизайн не подтверждён; выполнен independent analysis."
+                ),
+            }
+        ]
+    )
+
+    report = build_markdown_report(
+        metadata=metadata,
+        prepared=prepared,
+        validation_issues=issues,
+        failures=failure_summary(prepared),
+        group_comparisons=[comparison],
+        audit=AuditTrail(),
+    )
+
+    assert "## Сравнение групп" in report
+    assert "pairing_status=`independent_fallback`" in report
+    assert "pairing_reason=`missing_pair_id:both_groups`" in report
+    assert "Парный дизайн не подтверждён; выполнен independent analysis." in report
+
+
 def test_report_and_bundle_include_provenance_source_and_manifest() -> None:
     source = b"test_id,stage,load,settlement\nT1,1,1,0.2\n"
     metadata = {
