@@ -17,6 +17,7 @@ import pandas as pd
 
 from .manual_entry_models import (
     MANUAL_EDITOR_COLUMNS,
+    MANUAL_INDICATOR_CHANNELS,
     MAX_MANUAL_DRAFT_ROWS,
     ManualAuditEvent,
     ManualDraft,
@@ -32,6 +33,19 @@ EDITOR_COLUMNS = (EDITOR_UUID_COLUMN, *MANUAL_EDITOR_COLUMNS)
 _TEXT_FIELDS = {"branch", "row_status", "comment"}
 _OPTIONAL_TEXT_FIELDS = set(MANUAL_EDITOR_COLUMNS) - _TEXT_FIELDS - {"sequence_no"}
 _PROTECTED_EDITOR_FIELDS = {EDITOR_UUID_COLUMN}
+_DEFAULT_PASSPORT_UPDATE_REASON = "manual_edit"
+_METROLOGY_SENSITIVE_PASSPORT_FIELDS = frozenset(
+    {
+        "test_date",
+        "number_of_indicators",
+        "indicator_passports",
+        "legacy_common_indicator_passport",
+        "settlement_aggregation",
+        "settlement_aggregation_channels",
+        "settlement_primary_channel",
+        "settlement_missing_channel_policy",
+    }
+)
 
 
 class ManualEntryServiceError(ValueError):
@@ -388,11 +402,45 @@ class ManualEntryService:
                     normalized_value = int(numeric)
                 passport_payload[field] = normalized_value
                 requested.append((field, old, value))
+
+        sensitive_changed = any(
+            before.passport.get(field) != passport_payload.get(field)
+            for field in _METROLOGY_SENSITIVE_PASSPORT_FIELDS
+        )
+        final_status_requested = passport_payload.get("metrology_status")
+        normalized_reason = reason.strip() if isinstance(reason, str) else ""
+        explicit_confirmation = bool(
+            final_status_requested == "confirmed"
+            and "metrology_status" in changes
+            and changes["metrology_status"] == "confirmed"
+            and normalized_reason
+            and normalized_reason != _DEFAULT_PASSPORT_UPDATE_REASON
+        )
+        confirmation_transition = bool(
+            before.passport.get("metrology_status") != "confirmed"
+            and final_status_requested == "confirmed"
+        )
+        if confirmation_transition and not explicit_confirmation:
+            raise ManualEntryServiceError(
+                "Для подтверждения метрологии требуется явное инженерное "
+                "обоснование reason, отличное от manual_edit."
+            )
+        explicit_reconfirmation = bool(
+            sensitive_changed and explicit_confirmation
+        )
+        auto_invalidated = bool(
+            sensitive_changed
+            and final_status_requested == "confirmed"
+            and not explicit_confirmation
+        )
+        if auto_invalidated:
+            passport_payload["metrology_status"] = "draft"
+
         passport_payload["reinforcement"] = reinforcement_payload
         replacement = ManualPassport.from_dict(passport_payload)
         normalized = replacement.to_dict()
-        self.draft.passport = replacement
 
+        prepared_events: list[ManualAuditEvent] = []
         for field, old, _ in requested:
             if field.startswith("reinforcement."):
                 new = normalized["reinforcement"][field.split(".", 1)[1]]
@@ -400,16 +448,218 @@ class ManualEntryService:
                 new = normalized[field]
             if old == new:
                 continue
-            self._event(
-                author=actor,
-                action="update_passport",
-                entity_id=f"{self.draft.draft_id}:passport",
-                field=field,
-                old_value=old,
-                new_value=new,
-                reason=reason,
+            if auto_invalidated and field == "metrology_status":
+                continue
+            prepared_events.append(
+                ManualAuditEvent.create(
+                    author=actor,
+                    action="update_passport",
+                    entity_id=f"{self.draft.draft_id}:passport",
+                    field=field,
+                    old_value=old,
+                    new_value=new,
+                    reason=reason,
+                )
             )
-        return self._finish(action="update_passport", before=before)
+        if auto_invalidated:
+            previous_status = before.passport["metrology_status"]
+            prepared_events.append(
+                ManualAuditEvent.create(
+                    author=actor,
+                    action=(
+                        "invalidate_metrology_confirmation"
+                        if previous_status == "confirmed"
+                        else "reject_metrology_confirmation"
+                    ),
+                    entity_id=f"{self.draft.draft_id}:passport",
+                    field="metrology_status",
+                    old_value=previous_status,
+                    new_value="draft",
+                    reason=reason,
+                )
+            )
+        elif explicit_reconfirmation:
+            prepared_events.append(
+                ManualAuditEvent.create(
+                    author=actor,
+                    action="reconfirm_metrology_after_update",
+                    entity_id=f"{self.draft.draft_id}:passport",
+                    field="metrology_status",
+                    old_value=before.passport["metrology_status"],
+                    new_value="confirmed",
+                    reason=reason,
+                )
+            )
+
+        if before.passport == normalized and not prepared_events:
+            return False
+
+        candidate_draft_payload = self.draft.to_dict()
+        candidate_draft_payload["passport"] = normalized
+        candidate_draft_payload["audit_events"] = [
+            *candidate_draft_payload["audit_events"],
+            *(event.to_dict() for event in prepared_events),
+        ]
+        ManualDraft.from_dict(candidate_draft_payload)
+
+        original_passport = self.draft.passport
+        original_audit_events = self.draft.audit_events
+        original_updated_at = self.draft.updated_at
+        original_undo_stack = list(self._undo_stack)
+        original_redo_stack = list(self._redo_stack)
+        try:
+            self.draft.passport = replacement
+            self.draft.audit_events = [
+                *original_audit_events,
+                *prepared_events,
+            ]
+            return self._finish(action="update_passport", before=before)
+        except Exception:
+            self.draft.passport = original_passport
+            self.draft.audit_events = original_audit_events
+            self.draft.updated_at = original_updated_at
+            self._undo_stack = original_undo_stack
+            self._redo_stack = original_redo_stack
+            raise
+
+    def copy_indicator_passport(
+        self,
+        source_channel: str,
+        target_channels: Sequence[str],
+        *,
+        author: str | None = None,
+        reason: str,
+    ) -> bool:
+        """Explicitly copy one stored channel passport into other channels.
+
+        Every changed target receives an independent deep copy marked for a
+        fresh engineering review and its own audit event.  A previously
+        confirmed project is explicitly invalidated.  The complete candidate
+        draft and all events are validated before the live draft is mutated.
+        """
+
+        if not isinstance(reason, str) or not reason.strip():
+            raise ManualEntryServiceError(
+                "Для копирования паспорта требуется непустое обоснование reason."
+            )
+        if source_channel not in MANUAL_INDICATOR_CHANNELS:
+            raise ManualEntryServiceError(
+                f"Неизвестный исходный канал индикатора {source_channel!r}."
+            )
+        source = self.draft.passport.indicator_passports.get(source_channel)
+        if source is None:
+            raise ManualEntryServiceError(
+                f"Для исходного канала {source_channel!r} паспорт не задан."
+            )
+        if isinstance(target_channels, (str, bytes)):
+            raise ManualEntryServiceError(
+                "target_channels должен быть последовательностью имён каналов."
+            )
+        targets = list(target_channels)
+        if not targets:
+            raise ManualEntryServiceError("Укажите хотя бы один целевой канал.")
+        if any(not isinstance(channel, str) for channel in targets):
+            raise ManualEntryServiceError("Все target_channels должны быть строками.")
+        unknown = sorted(set(targets) - set(MANUAL_INDICATOR_CHANNELS))
+        if unknown:
+            raise ManualEntryServiceError(
+                f"Неизвестные целевые каналы индикаторов: {unknown!r}."
+            )
+        if len(set(targets)) != len(targets):
+            raise ManualEntryServiceError("target_channels не должен содержать повторы.")
+        if source_channel in targets:
+            raise ManualEntryServiceError(
+                "Исходный канал не может одновременно быть целевым."
+            )
+
+        before = self._snapshot()
+        candidate_passport_payload = copy.deepcopy(before.passport)
+        source_payload = copy.deepcopy(
+            candidate_passport_payload["indicator_passports"][source_channel]
+        )
+        source_payload["assignment_status"] = "review_required"
+        changed_targets: list[tuple[str, Any, dict[str, Any]]] = []
+        for target in targets:
+            previous = copy.deepcopy(
+                candidate_passport_payload["indicator_passports"][target]
+            )
+            replacement_payload = copy.deepcopy(source_payload)
+            if previous == replacement_payload:
+                continue
+            candidate_passport_payload["indicator_passports"][target] = (
+                replacement_payload
+            )
+            changed_targets.append((target, previous, replacement_payload))
+
+        # Validate the complete passport even for a semantic no-op.  A corrupt
+        # in-memory source (for example NaN injected by an integration) must not
+        # be accepted merely because a target contains the same corrupt value.
+        candidate_passport = ManualPassport.from_dict(candidate_passport_payload)
+        if not changed_targets:
+            return False
+
+        previous_metrology_status = candidate_passport.metrology_status
+        invalidates_confirmation = previous_metrology_status == "confirmed"
+        if invalidates_confirmation:
+            candidate_passport_payload["metrology_status"] = "draft"
+            candidate_passport = ManualPassport.from_dict(candidate_passport_payload)
+
+        actor = self._author(author)
+        normalized_reason = reason.strip()
+        prepared_events = [
+            ManualAuditEvent.create(
+                author=actor,
+                action="copy_indicator_passport",
+                entity_id=f"{self.draft.draft_id}:passport:{target}",
+                field=f"indicator_passports.{target}",
+                old_value=old_value,
+                new_value=new_value,
+                reason=normalized_reason,
+            )
+            for target, old_value, new_value in changed_targets
+        ]
+        if invalidates_confirmation:
+            prepared_events.append(
+                ManualAuditEvent.create(
+                    author=actor,
+                    action="invalidate_metrology_confirmation",
+                    entity_id=f"{self.draft.draft_id}:passport",
+                    field="metrology_status",
+                    old_value=previous_metrology_status,
+                    new_value="draft",
+                    reason=normalized_reason,
+                )
+            )
+
+        # A full runtime round-trip validates existing rows/audit data together
+        # with the staged passport and new events before any live-state change.
+        candidate_draft_payload = self.draft.to_dict()
+        candidate_draft_payload["passport"] = candidate_passport.to_dict()
+        candidate_draft_payload["audit_events"] = [
+            *candidate_draft_payload["audit_events"],
+            *(event.to_dict() for event in prepared_events),
+        ]
+        ManualDraft.from_dict(candidate_draft_payload)
+
+        original_passport = self.draft.passport
+        original_audit_events = self.draft.audit_events
+        original_updated_at = self.draft.updated_at
+        original_undo_stack = list(self._undo_stack)
+        original_redo_stack = list(self._redo_stack)
+        try:
+            self.draft.passport = candidate_passport
+            self.draft.audit_events = [
+                *original_audit_events,
+                *prepared_events,
+            ]
+            return self._finish(action="copy_indicator_passport", before=before)
+        except Exception:
+            self.draft.passport = original_passport
+            self.draft.audit_events = original_audit_events
+            self.draft.updated_at = original_updated_at
+            self._undo_stack = original_undo_stack
+            self._redo_stack = original_redo_stack
+            raise
 
     def _new_point(
         self, *, author: str, values: Mapping[str, Any] | None = None

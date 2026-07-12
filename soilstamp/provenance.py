@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import math
 import os
 import platform
 import subprocess
@@ -146,6 +147,7 @@ def build_provenance(
     metadata_source: str | Path | bytes | bytearray | BinaryIO | dict[str, Any] | None,
     config: dict[str, Any],
     project_root: str | Path | None = None,
+    metrology_evaluations: Iterable[dict[str, Any]] | None = None,
 ) -> ProvenanceRecord:
     if isinstance(metadata_source, dict):
         metadata_hash = value_sha256(metadata_source)
@@ -161,6 +163,54 @@ def build_provenance(
         source_tree_sha256=source_tree_sha256(project_root),
         python_version=sys.version.split()[0],
         dependency_versions=dependency_versions(),
+        metrology_evaluations=sorted(
+            (dict(row) for row in (metrology_evaluations or [])),
+            key=lambda row: (str(row.get("test_id", "")), str(row.get("channel", ""))),
+        ),
+    )
+
+
+def metrology_evaluations_from_passports(passports: Any) -> list[dict[str, Any]]:
+    """Return deterministic verification evidence from effective passports."""
+
+    if passports is None:
+        return []
+    if hasattr(passports, "to_dict"):
+        try:
+            records = passports.to_dict(orient="records")
+        except TypeError:
+            records = passports.to_dict()
+    else:
+        records = list(passports)
+    if isinstance(records, dict):
+        records = [records]
+    fields = (
+        "test_id",
+        "channel",
+        "instrument_id",
+        "serial_number",
+        "verification_date",
+        "verification_valid_until",
+        "verification_status",
+        "verification_evaluation_date",
+        "verification_evaluation_date_source",
+        "verification_evaluation_rule",
+        "assignment_status",
+    )
+
+    def clean(value: Any) -> Any:
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+
+    result = [
+        {name: clean(row.get(name)) for name in fields}
+        for row in records
+        if isinstance(row, dict)
+    ]
+    return sorted(
+        result,
+        key=lambda row: (str(row.get("test_id") or ""), str(row.get("channel") or "")),
     )
 
 
@@ -238,6 +288,13 @@ def passport_completeness(
             if isinstance(values, dict) and values.get("pair_id")
         }
     ) if isinstance(tests, dict) else []
+    test_baseline_groups = sorted(
+        {
+            str(values.get("baseline_group"))
+            for values in tests.values()
+            if isinstance(values, dict) and values.get("baseline_group")
+        }
+    ) if isinstance(tests, dict) else []
     geometry = metadata.get("stamp_diameter_mm") or metadata.get("stamp_area_m2")
     values = {
         "project_id": passport.get("project_id") or metadata.get("project_id"),
@@ -245,7 +302,11 @@ def passport_completeness(
         "reinforcement_status": passport.get("reinforcement_status")
         or (reinforcement.get("type") if isinstance(reinforcement, dict) else None)
         or (sorted({str(item.get('type')) for item in test_reinforcement.values() if isinstance(item, dict) and item.get('type')}) or None),
-        "pair_id": passport.get("pair_id") or metadata.get("pair_id") or test_pairs,
+        "baseline_group": passport.get("baseline_group")
+        or metadata.get("baseline_group")
+        or test_baseline_groups
+        or None,
+        "pair_id": passport.get("pair_id") or metadata.get("pair_id") or test_pairs or None,
         "soil_batch": passport.get("soil_batch") or metadata.get("soil_batch") or soil.get("batch"),
         "experiment_date": passport.get("experiment_date") or metadata.get("experiment_date"),
         "operator": passport.get("operator") or metadata.get("operator"),
@@ -270,10 +331,15 @@ def passport_completeness(
             else metadata.get("instruments")
         ),
     }
-    missing = [name for name, value in values.items() if not _present(value)]
+    optional = {"baseline_group", "pair_id"}
+    missing = [
+        name
+        for name, value in values.items()
+        if name not in optional and not _present(value)
+    ]
     return {
         "complete": not missing,
-        "provided": [name for name in values if name not in missing],
+        "provided": [name for name, value in values.items() if _present(value)],
         "missing": missing,
         "fields": values,
     }

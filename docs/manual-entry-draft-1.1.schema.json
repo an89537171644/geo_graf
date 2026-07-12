@@ -1,0 +1,422 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/an89537171644/geo_graf/blob/main/docs/manual-entry-draft-1.1.schema.json",
+  "title": "Soil Stamp manual-entry draft 1.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "draft_id",
+    "status",
+    "created_by",
+    "created_at",
+    "updated_at",
+    "passport",
+    "rows",
+    "audit_events"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "manual-entry-draft/1.1"
+    },
+    "draft_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_by": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "passport": {
+      "$ref": "#/$defs/manual_passport"
+    },
+    "rows": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": {
+        "$ref": "#/$defs/manual_point"
+      }
+    },
+    "audit_events": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/audit_event"
+      }
+    }
+  },
+  "$defs": {
+    "nullable_string": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manual_reinforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "material",
+        "number_of_layers",
+        "depth_mm",
+        "spacing_mm",
+        "length_mm",
+        "width_mm",
+        "bar_diameter_or_aperture_mm",
+        "orientation",
+        "custom_parameters"
+      ],
+      "properties": {
+        "material": {
+          "type": "string"
+        },
+        "number_of_layers": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "depth_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "spacing_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "length_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "width_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "bar_diameter_or_aperture_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "orientation": {
+          "type": "string"
+        },
+        "custom_parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "manual_passport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_name",
+        "series_name",
+        "test_name",
+        "archive_number",
+        "test_date",
+        "operator",
+        "laboratory_or_site",
+        "test_scope",
+        "protocol_type",
+        "group_name",
+        "is_reinforced",
+        "baseline_group",
+        "pair_id",
+        "soil_type",
+        "soil_batch",
+        "reinforcement_type",
+        "stamp_shape",
+        "stamp_diameter_mm",
+        "stamp_area_m2",
+        "load_kind",
+        "load_unit",
+        "load_factor",
+        "load_zero",
+        "lever_ratio",
+        "settlement_unit",
+        "dial_mode",
+        "dial_range_mm",
+        "dial_resolution_mm",
+        "dial_correction_factor",
+        "dial_initial_reading",
+        "dial_zero_correction_mm",
+        "dial_max_increment_mm",
+        "dial_reverse_tolerance_mm",
+        "dial_travel_range_mm",
+        "indicator_type",
+        "indicator_serial_numbers",
+        "verification_date",
+        "verification_valid_until",
+        "number_of_indicators",
+        "comment",
+        "reinforcement"
+      ],
+      "properties": {
+        "project_name": {
+          "type": "string"
+        },
+        "series_name": {
+          "type": "string"
+        },
+        "test_name": {
+          "type": "string"
+        },
+        "archive_number": {
+          "type": "string"
+        },
+        "test_date": {
+          "type": "string"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "laboratory_or_site": {
+          "type": "string"
+        },
+        "test_scope": {
+          "type": "string"
+        },
+        "protocol_type": {
+          "type": "string"
+        },
+        "group_name": {
+          "type": "string"
+        },
+        "is_reinforced": {
+          "type": "boolean"
+        },
+        "baseline_group": {
+          "type": "string"
+        },
+        "pair_id": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "soil_type": {
+          "type": "string"
+        },
+        "soil_batch": {
+          "type": "string"
+        },
+        "reinforcement_type": {
+          "type": "string"
+        },
+        "stamp_shape": {
+          "type": "string"
+        },
+        "stamp_diameter_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "stamp_area_m2": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "load_kind": {
+          "type": "string"
+        },
+        "load_unit": {
+          "type": "string"
+        },
+        "load_factor": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "load_zero": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "lever_ratio": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "settlement_unit": {
+          "type": "string"
+        },
+        "dial_mode": {
+          "type": "string"
+        },
+        "dial_range_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_resolution_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_correction_factor": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_initial_reading": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_zero_correction_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_max_increment_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_reverse_tolerance_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "dial_travel_range_mm": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "indicator_type": {
+          "type": "string"
+        },
+        "indicator_serial_numbers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "verification_date": {
+          "type": "string"
+        },
+        "verification_valid_until": {
+          "type": "string"
+        },
+        "number_of_indicators": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "comment": {
+          "type": "string"
+        },
+        "reinforcement": {
+          "$ref": "#/$defs/manual_reinforcement"
+        }
+      }
+    },
+    "manual_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manual_row_uuid",
+        "sequence_no",
+        "stage_no",
+        "branch",
+        "elapsed_time_s",
+        "timestamp",
+        "load_raw",
+        "indicator_1_raw",
+        "indicator_2_raw",
+        "indicator_3_raw",
+        "indicator_4_raw",
+        "row_status",
+        "comment",
+        "source_type",
+        "source_row",
+        "created_by",
+        "created_at",
+        "modified_by",
+        "modified_at"
+      ],
+      "properties": {
+        "manual_row_uuid": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence_no": {
+          "type": "integer"
+        },
+        "stage_no": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "elapsed_time_s": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "timestamp": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "load_raw": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "indicator_1_raw": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "indicator_2_raw": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "indicator_3_raw": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "indicator_4_raw": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "row_status": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "source_type": {
+          "const": "manual"
+        },
+        "source_row": {
+          "type": "null"
+        },
+        "created_by": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modified_by": {
+          "type": "string"
+        },
+        "modified_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "audit_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "author",
+        "timestamp",
+        "action",
+        "entity_id",
+        "field",
+        "old_value",
+        "new_value",
+        "reason"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "$ref": "#/$defs/nullable_string"
+        },
+        "old_value": true,
+        "new_value": true,
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

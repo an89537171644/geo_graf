@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from .indicators import (
+    INDICATOR_PROCESSING_SCHEMA,
     INDICATOR_MODES,
     canonical_indicator_mode,
     process_indicator_frame,
@@ -239,12 +240,12 @@ def _indicator_instrument_ids(metadata: dict[str, Any]) -> list[str]:
         for item in container.values():
             if not isinstance(item, dict):
                 continue
-            identifier = item.get("instrument_id") or item.get("serial_number")
+            identifier = item.get("instrument_id")
             if identifier is not None and str(identifier).strip():
                 identifiers.append(str(identifier).strip())
     common = metadata.get("indicator_passport")
     if isinstance(common, dict):
-        identifier = common.get("instrument_id") or common.get("serial_number")
+        identifier = common.get("instrument_id")
         if identifier is not None and str(identifier).strip():
             identifiers.append(str(identifier).strip())
     return list(dict.fromkeys(value for value in identifiers if value))
@@ -290,19 +291,8 @@ def _indicator_calibration_parameters(
             and isinstance(metadata[name].get("reference_indicator"), dict)
             for name in ("indicator_passports", "indicator_channels")
         )
-        try:
-            reference_sign = float(metadata.get("reference_sign"))
-        except (TypeError, ValueError):
-            reference_sign = None
-        reference_valid = (
-            not reference_used
-            or reference_passport
-            or (
-                reference_sign is not None
-                and math.isfinite(reference_sign)
-                and math.isclose(abs(reference_sign), 1.0)
-            )
-        )
+        reference_sign = None
+        reference_valid = not reference_used or reference_passport
         instrument_ids = _indicator_instrument_ids(metadata)
         confirmed = bool(
             mode in INDICATOR_MODES
@@ -355,14 +345,7 @@ def _indicator_calibration_parameters(
         reference_sign = None
     instrument_ids = _indicator_instrument_ids(metadata)
     sign_valid = sign is not None and math.isfinite(sign) and math.isclose(abs(sign), 1.0)
-    reference_valid = (
-        not reference_used
-        or (
-            reference_sign is not None
-            and math.isfinite(reference_sign)
-            and math.isclose(abs(reference_sign), 1.0)
-        )
-    )
+    reference_valid = not reference_used
     confirmed = bool(
         mode in _SUPPORTED_PRECALIBRATED_INDICATOR_MODES
         and scale_to_mm is not None
@@ -456,6 +439,16 @@ def validate_measurements(
                 "Нужен settlement или хотя бы один столбец indicator_1..4.",
             )
         )
+    supplied_missing = (
+        pd.to_numeric(frame["settlement"], errors="coerce").isna()
+        if "settlement" in frame
+        else pd.Series(True, index=frame.index)
+    )
+    test_ids_for_measurement = frame["test_id"].astype("string")
+    test_requires_indicator = pd.Series(False, index=frame.index)
+    for test_id in test_ids_for_measurement.dropna().unique():
+        mask = test_ids_for_measurement == test_id
+        test_requires_indicator.loc[mask] = bool(supplied_missing.loc[mask].any())
     numeric_measurement_columns = [
         column
         for column in [
@@ -474,21 +467,33 @@ def validate_measurements(
         numeric = pd.to_numeric(original, errors="coerce")
         provided = original.notna() & original.astype(str).str.strip().ne("")
         invalid = provided & ~np.isfinite(numeric)
-        if invalid.any():
+        blocking_invalid = (
+            invalid
+            if column == "settlement"
+            else invalid & test_requires_indicator
+        )
+        auxiliary_invalid = invalid & ~blocking_invalid
+        if blocking_invalid.any():
             issues.append(
                 ValidationIssue(
                     "error",
                     "invalid_measurement",
                     f"{column} должен содержать только конечные числа или пустые значения.",
-                    rows=frame.index[invalid].tolist(),
+                    rows=frame.index[blocking_invalid].tolist(),
+                    column=column,
+                )
+            )
+        if auxiliary_invalid.any():
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    "invalid_auxiliary_indicator_ignored",
+                    f"Нечисловые auxiliary-значения {column} сохранены как raw и не использованы: прямая settlement авторитетна.",
+                    rows=frame.index[auxiliary_invalid].tolist(),
+                    column=column,
                 )
             )
     indicator_columns = _indicator_columns(frame)
-    supplied_missing = (
-        pd.to_numeric(frame["settlement"], errors="coerce").isna()
-        if "settlement" in frame
-        else pd.Series(True, index=frame.index)
-    )
     indicator_present = (
         frame[indicator_columns]
         .apply(pd.to_numeric, errors="coerce")
@@ -654,35 +659,17 @@ def validate_measurements(
                 )
                 if reference_has_passport:
                     pass
-                elif explicit.get("reference_sign") is None:
+                else:
                     issues.append(
                         ValidationIssue(
                             "error",
-                            "missing_indicator_calibration_metadata",
-                            "Для используемого reference_indicator нужно явно задать reference_sign.",
+                            "missing_reference_indicator_passport",
+                            "Для используемого reference_indicator нужен собственный явный поканальный паспорт.",
                             test_id=test_id,
                             rows=rows,
-                            column="reference_sign",
+                            column="reference_indicator",
                         )
                     )
-                else:
-                    reference_sign = calibration["reference_sign"]
-                    if not (
-                        reference_sign is not None
-                        and math.isfinite(reference_sign)
-                        and math.isclose(abs(reference_sign), 1.0)
-                    ):
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "invalid_indicator_sign",
-                                "reference_sign должен быть равен +1 или -1.",
-                                test_id=test_id,
-                                rows=rows,
-                                column="reference_sign",
-                                raw_value=explicit.get("reference_sign"),
-                            )
-                        )
         elif auxiliary.any() and not calibration["confirmed"]:
             issues.append(
                 ValidationIssue(
@@ -942,6 +929,8 @@ def validate_measurements(
         duplicate = any(
             item.code == indicator_issue.code
             and str(item.test_id or "") == str(indicator_issue.test_id or "")
+            and str(item.column or "") == str(indicator_issue.column or "")
+            and sorted(item.rows) == sorted(indicator_issue.rows)
             for item in issues
         )
         if not duplicate:
@@ -951,40 +940,6 @@ def validate_measurements(
 
 def _indicator_columns(frame: pd.DataFrame) -> list[str]:
     return [f"indicator_{index}" for index in range(1, 5) if f"indicator_{index}" in frame]
-
-
-def _raw_settlement_series(
-    frame: pd.DataFrame,
-    metadata: dict[str, Any],
-    *,
-    indicator_calibration: dict[str, Any] | None = None,
-) -> pd.Series:
-    factor = _settlement_factor(metadata)
-    if "settlement" in frame:
-        supplied = pd.to_numeric(frame["settlement"], errors="coerce") * factor
-    else:
-        supplied = pd.Series(np.nan, index=frame.index, dtype=float)
-    columns = _indicator_columns(frame)
-    if not columns or not indicator_calibration or not indicator_calibration.get("confirmed"):
-        return supplied
-    values = frame[columns].apply(pd.to_numeric, errors="coerce")
-    indicator_scale = float(indicator_calibration["scale_to_mm"])
-    calibration_factor = float(indicator_calibration["factor"])
-    indicator_sign = float(indicator_calibration["sign"])
-    calculated = (
-        values.mean(axis=1, skipna=True)
-        * indicator_sign
-        * indicator_scale
-        * calibration_factor
-    )
-    if indicator_calibration.get("reference_used") and "reference_indicator" in frame:
-        reference = (
-            pd.to_numeric(frame["reference_indicator"], errors="coerce")
-            * indicator_scale
-            * calibration_factor
-        )
-        calculated = calculated + float(indicator_calibration["reference_sign"]) * reference
-    return supplied.where(supplied.notna(), calculated)
 
 
 def classify_branches(
@@ -1048,7 +1003,7 @@ def prepare_measurements(
             metadata if isinstance(metadata, dict) else {}, strict=True
         )
     issues = [*project_issues, *validate_measurements(frame, metadata)]
-    if any(item.level == "error" for item in issues):
+    if any(bool(item.blocks_processing) for item in issues):
         return frame.copy(deep=True), issues
     result = frame.copy(deep=True).reset_index(drop=True)
     if "source_row" not in result:
@@ -1101,12 +1056,26 @@ def prepare_measurements(
         indicator_calibration = _indicator_calibration_parameters(
             explicit, reference_used=reference_used
         )
+        aggregation_rows_for_test = [
+            row
+            for row in indicator_processing.aggregation_rows
+            if str(row.get("test_id")) == str(test_id)
+        ]
+        required_channels: set[str] = set()
+        if aggregation_rows_for_test:
+            try:
+                required_channels = set(
+                    json.loads(aggregation_rows_for_test[0]["channels_required"])
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                required_channels = set()
         effective_passports = [
             row
             for row in indicator_processing.passport_rows
             if str(row.get("test_id")) == str(test_id)
             and str(row.get("channel", "")).startswith("indicator_")
             and str(row.get("channel")) != "reference_indicator"
+            and str(row.get("channel")) in required_channels
         ]
         if effective_passports:
             modes = {str(row.get("mode")) for row in effective_passports}
@@ -1131,7 +1100,12 @@ def prepare_measurements(
             ]
             indicator_calibration.update(
                 {
-                    "confirmed": True,
+                    "confirmed": all(
+                        row.get("assignment_status") == "confirmed"
+                        and row.get("verification_status")
+                        == "valid_at_experiment"
+                        for row in effective_passports
+                    ),
                     "mode": next(iter(modes)) if len(modes) == 1 else "per_channel",
                     "unit": "mm",
                     "scale_to_mm": 1.0,
@@ -1140,13 +1114,15 @@ def prepare_measurements(
                     "resolution_mm": max(effective_resolutions, default=np.nan),
                     "instrument_ids": list(
                         dict.fromkeys(
-                            str(row.get("instrument_id") or row.get("serial_number"))
+                            str(row.get("instrument_id"))
                             for row in effective_passports
-                            if row.get("instrument_id") or row.get("serial_number")
+                            if row.get("instrument_id")
                         )
                     ),
                 }
             )
+        else:
+            indicator_calibration["confirmed"] = False
         if "settlement" in part:
             supplied_settlement = (
                 pd.to_numeric(part["settlement"], errors="coerce")
@@ -1236,8 +1212,28 @@ def prepare_measurements(
         indicator_calibration_confirmed_parts.append(
             pd.Series(bool(indicator_calibration["confirmed"]), index=part.index)
         )
+        aggregation_for_test = {
+            int(row["row_index"]): row
+            for row in indicator_processing.aggregation_rows
+            if str(row.get("test_id")) == str(test_id)
+        }
         reference_channel_used_parts.append(
-            pd.Series(bool(indicator_calibration["reference_used"]), index=part.index)
+            pd.Series(
+                {
+                    int(index): bool(
+                        aggregation_for_test.get(int(index), {}).get(
+                            "reference_correction_mm"
+                        )
+                        is not None
+                        and aggregation_for_test.get(int(index), {}).get(
+                            "aggregation_status"
+                        )
+                        == "ok"
+                    )
+                    for index in part.index
+                },
+                index=part.index,
+            )
         )
         indicator_instrument_parts.append(
             pd.Series(
@@ -1314,6 +1310,30 @@ def prepare_measurements(
             index=result.index,
             dtype="float64",
         )
+    aggregation_by_index = {
+        int(row["row_index"]): row for row in indicator_processing.aggregation_rows
+    }
+    aggregation_columns = (
+        "aggregated_settlement_mm",
+        "aggregation_method",
+        "channels_required",
+        "channels_used",
+        "missing_channels",
+        "aggregation_status",
+        "plane_rank",
+        "plane_residual_rms_mm",
+        "tilt_magnitude_mm_per_mm",
+        "tilt_direction_deg",
+        "tilt_direction_resolved",
+    )
+    for column in aggregation_columns:
+        result[column] = pd.Series(
+            {
+                int(index): aggregation_by_index.get(int(index), {}).get(column)
+                for index in result.index
+            },
+            index=result.index,
+        )
     result["group"] = pd.concat(group_parts).sort_index()
     result["pair_id"] = pd.concat(pair_parts).sort_index()
     suggested = classify_branches(result)
@@ -1335,7 +1355,33 @@ def prepare_measurements(
     result.attrs["indicator_calibration_parameters"] = deepcopy(
         indicator_processing.passport_rows
     )
-    result.attrs["indicator_processing_schema"] = "indicator-processing/1.0"
+    result.attrs["indicator_aggregation_results"] = deepcopy(
+        indicator_processing.aggregation_rows
+    )
+    result.attrs["metrology_evaluations"] = [
+        {
+            "test_id": row.get("test_id"),
+            "channel": row.get("channel"),
+            "instrument_id": row.get("instrument_id"),
+            "verification_date": row.get("verification_date"),
+            "verification_valid_until": row.get(
+                "verification_valid_until"
+            ),
+            "assignment_status": row.get("assignment_status"),
+            "verification_status": row.get("verification_status"),
+            "verification_evaluation_date": row.get(
+                "verification_evaluation_date"
+            ),
+            "verification_evaluation_date_source": row.get(
+                "verification_evaluation_date_source"
+            ),
+            "verification_evaluation_rule": row.get(
+                "verification_evaluation_rule"
+            ),
+        }
+        for row in indicator_processing.passport_rows
+    ]
+    result.attrs["indicator_processing_schema"] = INDICATOR_PROCESSING_SCHEMA
     return result, issues
 
 
@@ -1522,47 +1568,110 @@ def _stable_status_mask(frame: pd.DataFrame) -> pd.Series:
     return accepted & ~invalid & ~_failure_mask(frame)
 
 
-def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
-    """Summarize interval/right censoring without fabricating failure settlement."""
+FAILURE_ANALYSIS_CONTRACT_VERSION = "failure-analysis/1.0"
 
-    required = {"test_id", "F_kN", "p_kPa", "settlement_mm"}
+
+def _finite_optional_float(value: Any) -> float | None:
+    """Return a finite float without converting a missing bound into a value."""
+
+    if value is None or pd.isna(value):
+        return None
+    number = float(value)
+    return number if np.isfinite(number) else None
+
+
+def _failure_sequence_value(row: pd.Series | None) -> int | float | str | None:
+    if row is None or "sequence_no" not in row or pd.isna(row.get("sequence_no")):
+        return None
+    value = row.get("sequence_no")
+    if isinstance(value, (np.integer, int)):
+        return int(value)
+    if isinstance(value, (np.floating, float)):
+        number = float(value)
+        return int(number) if number.is_integer() else number
+    return str(value)
+
+
+def _failure_capacity_fields(
+    payload: dict[str, Any],
+    *,
+    load_kind: str | None = None,
+) -> tuple[str, float | None, float | None, str | None]:
+    """Select the available physical coordinate without inventing conversions."""
+
+    force_lower = _finite_optional_float(payload.get("Fu_lower"))
+    force_upper = _finite_optional_float(payload.get("Fu_upper"))
+    pressure_lower = _finite_optional_float(payload.get("pu_lower"))
+    pressure_upper = _finite_optional_float(payload.get("pu_upper"))
+    if load_kind == "pressure":
+        return "pressure", pressure_lower, pressure_upper, "kPa"
+    if load_kind == "force":
+        return "force", force_lower, force_upper, "kN"
+    if force_lower is not None or force_upper is not None:
+        return "force", force_lower, force_upper, "kN"
+    if pressure_lower is not None or pressure_upper is not None:
+        return "pressure", pressure_lower, pressure_upper, "kPa"
+    return "unknown", None, None, None
+
+
+def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    """Summarize failure events and censoring without fabricating point estimates.
+
+    ``failure_observed`` records whether a failure event was documented.  It is
+    deliberately orthogonal to ``censoring_type``: in a step-loading protocol a
+    documented failure normally has an interval-censored capacity.
+    """
+
+    required = {"test_id", "F_kN", "p_kPa"}
     if not required.issubset(frame):
         raise ValueError(f"Не хватает столбцов: {sorted(required.difference(frame.columns))}")
     rows: list[dict[str, Any]] = []
     for test_id, part in frame.groupby("test_id", sort=False):
         ordered = part.sort_values("sequence_no", kind="stable") if "sequence_no" in part else part
-        fail_mask = ordered["is_failure"].astype(bool) if "is_failure" in ordered else _failure_mask(ordered)
+        load_kinds = (
+            ordered["load_kind"].dropna().astype(str).str.strip().str.casefold().unique().tolist()
+            if "load_kind" in ordered
+            else []
+        )
+        declared_load_kind = (
+            load_kinds[0]
+            if len(load_kinds) == 1 and load_kinds[0] in {"force", "pressure"}
+            else None
+        )
+        fail_mask = (
+            ordered["is_failure"].astype(bool)
+            if "is_failure" in ordered
+            else _failure_mask(ordered)
+        )
+        failure_event_count = int(fail_mask.sum())
+        failure_row: pd.Series | None = None
+        last: pd.Series | None = None
+        lower_bound_row: pd.Series | None = None
         if fail_mask.any():
             failure_pos = int(np.flatnonzero(fail_mask.to_numpy())[0])
             failure_row = ordered.iloc[failure_pos]
             before = ordered.iloc[:failure_pos]
             stable = before[
-                (before["F_kN"].notna() | before["p_kPa"].notna())
-                & _stable_status_mask(before)
+                (before["F_kN"].notna() | before["p_kPa"].notna()) & _stable_status_mask(before)
             ]
             last = stable.iloc[-1] if not stable.empty else None
             f_failure = float(failure_row["F_kN"]) if pd.notna(failure_row["F_kN"]) else None
-            f_stable = (
-                float(last["F_kN"])
-                if last is not None and pd.notna(last["F_kN"])
-                else None
-            )
+            f_stable = float(last["F_kN"]) if last is not None and pd.notna(last["F_kN"]) else None
             p_failure = float(failure_row["p_kPa"]) if pd.notna(failure_row["p_kPa"]) else None
             p_stable = (
-                float(last["p_kPa"])
-                if last is not None and pd.notna(last["p_kPa"])
-                else None
+                float(last["p_kPa"]) if last is not None and pd.notna(last["p_kPa"]) else None
             )
             s_stable = (
                 float(last["settlement_mm"])
-                if last is not None and pd.notna(last["settlement_mm"])
+                if last is not None and "settlement_mm" in last and pd.notna(last["settlement_mm"])
                 else None
             )
             s_failure = (
                 float(failure_row["settlement_mm"])
-                if pd.notna(failure_row["settlement_mm"])
+                if "settlement_mm" in failure_row and pd.notna(failure_row["settlement_mm"])
                 else None
             )
+            lower_bound_row = last
             result = FailureResult(
                 test_id=str(test_id),
                 failure_reached=True,
@@ -1587,8 +1696,7 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
             )
         else:
             stable = ordered[
-                _stable_status_mask(ordered)
-                & (ordered["F_kN"].notna() | ordered["p_kPa"].notna())
+                _stable_status_mask(ordered) & (ordered["F_kN"].notna() | ordered["p_kPa"].notna())
             ]
             fmax_raw = pd.to_numeric(stable["F_kN"], errors="coerce").max()
             fmax = float(fmax_raw) if pd.notna(fmax_raw) else None
@@ -1600,11 +1708,20 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
                 last_at_max = stable[np.isclose(stable["p_kPa"], pmax, rtol=0, atol=1e-12)]
             else:
                 last_at_max = stable.iloc[0:0]
-            s_at_max = float(last_at_max.iloc[-1]["settlement_mm"]) if not last_at_max.empty else None
+            lower_bound_row = last_at_max.iloc[-1] if not last_at_max.empty else None
+            last = lower_bound_row
+            s_at_max = (
+                float(lower_bound_row["settlement_mm"])
+                if lower_bound_row is not None
+                and "settlement_mm" in lower_bound_row
+                and pd.notna(lower_bound_row["settlement_mm"])
+                else None
+            )
+            has_valid_lower_bound = fmax is not None or pmax is not None
             result = FailureResult(
                 test_id=str(test_id),
                 failure_reached=False,
-                right_censored=True,
+                right_censored=has_valid_lower_bound,
                 F_last_stable=fmax,
                 F_failure_step=None,
                 Fu_lower=fmax,
@@ -1623,5 +1740,149 @@ def failure_summary(frame: pd.DataFrame) -> pd.DataFrame:
                     else "Предельная нагрузка не определена"
                 ),
             )
-        rows.append(asdict(result))
+        payload = asdict(result)
+        capacity_kind, capacity_lower, capacity_upper, capacity_unit = _failure_capacity_fields(
+            payload, load_kind=declared_load_kind
+        )
+        warnings: list[str] = []
+        if len(load_kinds) > 1:
+            warnings.append("inconsistent_load_kind")
+        if failure_event_count > 1:
+            warnings.append(f"multiple_failure_events:{failure_event_count};first_sequence_used")
+        failure_observed = failure_event_count > 0
+        valid_interval = (
+            failure_observed
+            and capacity_lower is not None
+            and capacity_upper is not None
+            and capacity_lower < capacity_upper
+        )
+        if valid_interval:
+            censoring_type = "interval_censored"
+        elif not failure_observed and capacity_lower is not None:
+            censoring_type = "right_censored"
+        else:
+            censoring_type = "indeterminate"
+            if failure_observed:
+                if capacity_lower is None or capacity_upper is None:
+                    warnings.append("missing_interval_bound")
+                else:
+                    warnings.append("invalid_interval_bounds")
+            else:
+                warnings.append("missing_valid_lower_bound")
+        classification_status = "review_required" if warnings else "ok"
+        if censoring_type == "indeterminate":
+            payload["display"] = (
+                "Разрушение зафиксировано; границы требуют проверки"
+                if failure_observed
+                else "Предельная нагрузка не определена; требуется проверка"
+            )
+        elif censoring_type == "interval_censored":
+            symbol = "Fu" if capacity_kind == "force" else "pu"
+            display_unit = "кН" if capacity_kind == "force" else "кПа"
+            payload["display"] = (
+                f"{capacity_lower:g} < {symbol} ≤ {capacity_upper:g} {display_unit}"
+            )
+        else:
+            symbol = "Fu" if capacity_kind == "force" else "pu"
+            display_unit = "кН" if capacity_kind == "force" else "кПа"
+            payload["display"] = f"{symbol} > {capacity_lower:g} {display_unit}"
+        classification_warning = ";".join(warnings) if warnings else None
+        payload.update(
+            {
+                "failure_observed": failure_observed,
+                "interval_censored": censoring_type == "interval_censored",
+                "right_censored": censoring_type == "right_censored",
+                "censoring_type": censoring_type,
+                "classification_status": classification_status,
+                "classification_warning": classification_warning,
+                "capacity_kind": capacity_kind,
+                "lower_bound": capacity_lower,
+                "upper_bound": capacity_upper,
+                "capacity_lower": capacity_lower,
+                "capacity_upper": capacity_upper,
+                "capacity_unit": capacity_unit,
+                "lower_inclusive": False,
+                "upper_inclusive": (
+                    True if censoring_type == "interval_censored" else None
+                ),
+                "warning": classification_warning,
+                "capacity_lower_inclusive": False if capacity_lower is not None else None,
+                "capacity_upper_inclusive": (
+                    True if censoring_type == "interval_censored" else None
+                ),
+                "failure_event_count": failure_event_count,
+                "failure_sequence_no": _failure_sequence_value(failure_row),
+                "last_stable_sequence_no": _failure_sequence_value(last),
+                "lower_bound_sequence_no": _failure_sequence_value(lower_bound_row),
+                "upper_bound_sequence_no": _failure_sequence_value(failure_row),
+            }
+        )
+        rows.append(payload)
+    rows.sort(key=lambda row: str(row["test_id"]))
     return pd.DataFrame(rows)
+
+
+def failure_analysis_contract() -> dict[str, Any]:
+    """Return the versioned, deliberately conservative failure-analysis contract."""
+
+    return {
+        "contract_version": FAILURE_ANALYSIS_CONTRACT_VERSION,
+        "default_summary_method": "none",
+        "supported_summary_methods": ["none"],
+        "supported_capacity_axes": ["auto", "force", "pressure"],
+        "point_estimate_policy": (
+            "No aggregate point estimate is produced unless a separately versioned "
+            "censored-data method is explicitly supported and selected."
+        ),
+    }
+
+
+def failure_analysis_summary(
+    failures: pd.DataFrame,
+    *,
+    summary_method: str = "none",
+    capacity_axis: str = "auto",
+) -> dict[str, Any]:
+    """Count failure/censoring states under ``failure-analysis/1.0``.
+
+    The current contract intentionally supports no aggregate estimator.  This
+    prevents interval bounds and right-censored lower bounds from being reduced
+    to a hidden arithmetic mean.
+    """
+
+    method = str(summary_method).strip()
+    if method != "none":
+        raise ValueError(
+            "Неподдерживаемый метод сводного анализа разрушения: "
+            f"{summary_method!r}. В failure-analysis/1.0 доступен только 'none'."
+        )
+    axis = str(capacity_axis).strip()
+    if axis not in {"auto", "force", "pressure"}:
+        raise ValueError("capacity_axis должен быть одним из: auto, force, pressure.")
+    if "censoring_type" not in failures:
+        raise ValueError("Сначала сформируйте таблицу через failure_summary().")
+    censoring = failures["censoring_type"].fillna("indeterminate").astype(str)
+    observed_source = failures.get(
+        "failure_observed", failures.get("failure_reached", pd.Series(False, index=failures.index))
+    )
+    observed = observed_source.fillna(False).astype(bool)
+    review = (
+        failures.get("classification_status", pd.Series("review_required", index=failures.index))
+        .fillna("review_required")
+        .astype(str)
+    )
+    return {
+        "contract_version": FAILURE_ANALYSIS_CONTRACT_VERSION,
+        "summary_method": method,
+        "capacity_axis": axis,
+        "capacity_unit": {"force": "kN", "pressure": "kPa"}.get(axis),
+        "analysis_status": "descriptive_only_no_point_estimate",
+        "point_estimate": None,
+        "point_estimate_unit": None,
+        "n_tests": int(len(failures)),
+        "n_failure_observed": int(observed.sum()),
+        "n_interval_censored": int(censoring.eq("interval_censored").sum()),
+        "n_right_censored": int(censoring.eq("right_censored").sum()),
+        "n_indeterminate": int(censoring.eq("indeterminate").sum()),
+        "n_review_required": int(review.eq("review_required").sum()),
+    }

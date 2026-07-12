@@ -8,9 +8,10 @@ import json
 import math
 import platform
 import sys
+import unicodedata
 import zipfile
 from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import matplotlib
@@ -20,6 +21,7 @@ import scipy
 
 from .data import AuditTrail
 from .indicators import (
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
@@ -79,16 +81,87 @@ def software_versions() -> dict[str, str]:
     }
 
 
+def _modulus_text(value: Any, fallback: str = "—") -> str:
+    """Render a methodology field without exposing pandas missing values."""
+
+    if value is None:
+        return fallback
+    try:
+        if pandas.isna(value):
+            return fallback
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return text or fallback
+
+
+def _modulus_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value) if math.isfinite(float(value)) else False
+    return str(value).strip().casefold() in {"1", "true", "yes", "да"}
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _modulus_resolution_mpa(row: pandas.Series) -> float:
+    """Choose MPa rounding from the reported confidence interval.
+
+    The uncertainty is shown with one significant digit, or two when its
+    leading digit is one or two.  The same decimal place is then used for the
+    estimate and both confidence limits.
+    """
+
+    estimate = _finite_float(row.get("E_stamp_app_kPa"))
+    low = _finite_float(row.get("ci_low_kPa"))
+    high = _finite_float(row.get("ci_high_kPa"))
+    if estimate is None or low is None or high is None:
+        return 0.01
+    uncertainty = max(abs(estimate - low), abs(high - estimate)) / 1000.0
+    if not math.isfinite(uncertainty) or uncertainty <= 0:
+        return 0.01
+    exponent = math.floor(math.log10(uncertainty))
+    leading = uncertainty / (10**exponent)
+    significant_digits = 2 if leading < 3 else 1
+    return float(10 ** (exponent - significant_digits + 1))
+
+
+def _modulus_used_rows(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return json.dumps(list(value), ensure_ascii=False)
+    text = _modulus_text(value)
+    return text if text != "—" else "не указаны"
+
+
+def _modulus_profile(row: pandas.Series) -> str:
+    profile_id = _modulus_text(row.get("profile_id"), "diagnostic_unapproved_v1")
+    profile_version = _modulus_text(row.get("profile_version"), "legacy")
+    return f"{profile_id}@{profile_version}"
+
+
 def _indicator_tables_for_scope(
     prepared,
     test_ids: list[str] | None = None,
-) -> tuple[pandas.DataFrame, pandas.DataFrame, pandas.DataFrame]:
+) -> tuple[
+    pandas.DataFrame,
+    pandas.DataFrame,
+    pandas.DataFrame,
+    pandas.DataFrame,
+]:
     """Return calibration artefacts limited to the report's test scope."""
 
     tables = (
         indicator_audit_frame(prepared),
         indicator_event_frame(prepared),
         indicator_passport_frame(prepared),
+        indicator_aggregation_frame(prepared),
     )
     if test_ids is None:
         return tables
@@ -98,7 +171,7 @@ def _indicator_tables_for_scope(
         if not table.empty and "test_id" in table:
             table = table[table["test_id"].astype(str).isin(selected)].copy()
         scoped.append(table)
-    return scoped[0], scoped[1], scoped[2]
+    return scoped[0], scoped[1], scoped[2], scoped[3]
 
 
 def build_markdown_report(
@@ -109,6 +182,7 @@ def build_markdown_report(
     failures,
     pcr_results: dict[str, PCRResult] | None = None,
     moduli=None,
+    group_comparisons: list[Any] | None = None,
     figure_caption: str | None = None,
     plot_warnings: list[str] | None = None,
     audit: AuditTrail | None = None,
@@ -117,6 +191,9 @@ def build_markdown_report(
     import_info: dict[str, Any] | None = None,
     source_test_ids: list[str] | None = None,
     source_row_count: int | None = None,
+    failure_analysis: dict[str, Any] | None = None,
+    curve_selections: list[dict[str, Any]] | None = None,
+    plotted_curve_points=None,
 ) -> str:
     load_resolution = float(metadata.get("load_resolution_kN", 0.01))
     pressure_resolution_values = pandas.to_numeric(
@@ -173,9 +250,12 @@ def build_markdown_report(
             f"D={row['stamp_diameter_mm']}; A={row['stamp_area_m2']}."
         )
     lines.extend(["", "## Индикаторные каналы", ""])
-    indicator_audit, indicator_events, indicator_passports = _indicator_tables_for_scope(
-        prepared, selected_test_ids
-    )
+    (
+        indicator_audit,
+        indicator_events,
+        indicator_passports,
+        indicator_aggregation,
+    ) = _indicator_tables_for_scope(prepared, selected_test_ids)
     if indicator_passports.empty:
         raw_channels = [
             name
@@ -195,7 +275,16 @@ def build_markdown_report(
         for _, row in indicator_passports.iterrows():
             valid_from = str(row.get("verification_date") or "—")
             valid_until = str(row.get("verification_valid_until") or "—")
-            instrument = row.get("instrument_id") or row.get("serial_number") or "—"
+            verification_status = str(row.get("verification_status") or "review_required")
+            evaluation_date = str(row.get("verification_evaluation_date") or "—")
+            evaluation_source = str(
+                row.get("verification_evaluation_date_source") or "unknown"
+            )
+            evaluation_rule = str(
+                row.get("verification_evaluation_rule") or "—"
+            )
+            instrument_id = row.get("instrument_id") or "—"
+            serial_number = row.get("serial_number") or "—"
             compatibility = (
                 "; режим совместимости с ранее откалиброванной осадкой"
                 if bool(row.get("compatibility_mode", False))
@@ -203,11 +292,16 @@ def build_markdown_report(
             )
             lines.append(
                 f"- `{row.get('test_id')}` / `{row.get('channel')}`: "
-                f"тип={row.get('indicator_type') or '—'}; №={instrument}; "
+                f"тип={row.get('indicator_type') or '—'}; "
+                f"instrument_id={instrument_id}; заводской №={serial_number}; "
                 f"mode=`{row.get('mode')}`; диапазон={row.get('range_mm')} мм; "
                 f"цена деления={row.get('division_mm')} мм; "
                 f"коэффициент={row.get('correction_factor')}; "
-                f"поверка={valid_from}…{valid_until}{compatibility}."
+                f"координаты=({row.get('x_mm')}, {row.get('y_mm')}) мм; "
+                f"назначение=`{row.get('assignment_status') or '—'}`; "
+                f"поверка={valid_from}…{valid_until}; статус=`{verification_status}`; "
+                f"дата оценки={evaluation_date} ({evaluation_source}); "
+                f"правило=`{evaluation_rule}`{compatibility}."
             )
     if indicator_audit.empty:
         lines.append("- Таблица преобразования индикаторов пуста.")
@@ -246,6 +340,63 @@ def build_markdown_report(
             f"- Журнал: переходов через ноль — {zero_crossings}; точек обратного хода — "
             f"{reverse_points}; коррекций нуля — {correction_events}; точек с QC-флагами — {qc_points}."
         )
+    lines.extend(["", "## Агрегация осадки", ""])
+    if indicator_aggregation.empty:
+        lines.append(
+            "- Таблица агрегации пуста: осадка по индикаторным каналам не формировалась."
+        )
+    else:
+        for test_id, part in indicator_aggregation.groupby("test_id", sort=False):
+            methods = sorted(
+                set(part.get("aggregation_method", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            statuses = (
+                part.get("aggregation_status", pandas.Series(dtype="string"))
+                .fillna("unknown")
+                .astype(str)
+                .value_counts()
+                .to_dict()
+            )
+            status_text = ", ".join(
+                f"{name}={count}" for name, count in statuses.items()
+            )
+            required = sorted(
+                set(part.get("channels_required", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            used = sorted(
+                set(part.get("channels_used", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            missing = sorted(
+                set(part.get("missing_channels", pandas.Series(dtype="string")).dropna().astype(str))
+            )
+            lines.append(
+                f"- `{test_id}`: метод={', '.join(f'`{value}`' for value in methods) or '—'}; "
+                f"статусы={status_text or '—'}; required={required or ['[]']}; "
+                f"used={used or ['[]']}; missing={missing or ['[]']}."
+            )
+            plane_rank_values = pandas.to_numeric(
+                part.get(
+                    "plane_rank",
+                    pandas.Series(float("nan"), index=part.index),
+                ),
+                errors="coerce",
+            )
+            plane = part[plane_rank_values.notna()]
+            if not plane.empty:
+                ranks = sorted(
+                    set(pandas.to_numeric(plane["plane_rank"], errors="coerce").dropna().astype(int))
+                )
+                residual = pandas.to_numeric(
+                    plane.get("plane_residual_rms_mm"), errors="coerce"
+                ).dropna()
+                tilt = pandas.to_numeric(
+                    plane.get("tilt_magnitude_mm_per_mm"), errors="coerce"
+                ).dropna()
+                lines.append(
+                    f"  - plane_center: rank={ranks or '—'}; "
+                    f"residual RMS max={float(residual.max()) if len(residual) else '—'} мм; "
+                    f"tilt max={float(tilt.max()) if len(tilt) else '—'} мм/мм."
+                )
     lines.extend(["", "## Контроль качества", ""])
     if validation_issues:
         for issue in validation_issues:
@@ -269,55 +420,188 @@ def build_markdown_report(
             )
     else:
         lines.append("- Замечаний в автоматической проверке нет.")
+    lines.extend(["", "## Выбор кривых для публикации", ""])
+    if curve_selections:
+        for decision in curve_selections:
+            group = _modulus_text(decision.get("group"))
+            method = _modulus_text(decision.get("method"))
+            details = []
+            if decision.get("test_id"):
+                details.append(f"test_id=`{decision['test_id']}`")
+            if decision.get("author"):
+                details.append(f"author=`{decision['author']}`")
+            if decision.get("timestamp_utc"):
+                details.append(f"timestamp_utc=`{decision['timestamp_utc']}`")
+            if decision.get("reason"):
+                details.append(f"reason={decision['reason']}")
+            lines.append(
+                f"- `{group}`: method=`{method}`"
+                + ("; " + "; ".join(details) if details else "")
+                + "."
+            )
+    else:
+        lines.append("- Публикационный выбор кривых в этом запуске не применялся.")
+    if plotted_curve_points is not None and len(plotted_curve_points):
+        point_frame = pandas.DataFrame(plotted_curve_points)
+        measured = (
+            int(
+                pandas.to_numeric(point_frame["measured_n"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            if "measured_n" in point_frame
+            else 0
+        )
+        interpolated = (
+            int(
+                pandas.to_numeric(point_frame["interpolated_n"], errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            if "interpolated_n" in point_frame
+            else 0
+        )
+        lines.append(
+            f"- Сохранено точек графика: {len(point_frame)}; "
+            f"вкладов измеренных={measured}, интерполированных={interpolated}."
+        )
+
     lines.extend(["", "## Разрушение и цензурирование", ""])
-    for _, row in failures.iterrows():
-        if bool(row["failure_reached"]):
-            if pandas.notna(row["F_last_stable"]) and pandas.notna(row["F_failure_step"]):
-                localized_failure = (
-                    f"{format_ru(row['F_last_stable'], resolution=load_resolution)} < Fu ≤ "
-                    f"{format_ru(row['F_failure_step'], resolution=load_resolution, unit='кН')}"
-                )
-                capacity_kind = "force"
-            elif pandas.notna(row.get("p_last_stable")) and pandas.notna(row.get("p_failure_step")):
-                localized_failure = (
-                    f"{format_ru(row['p_last_stable'], resolution=pressure_resolution)} < pu ≤ "
-                    f"{format_ru(row['p_failure_step'], resolution=pressure_resolution, unit='кПа')}"
-                )
-                capacity_kind = "pressure"
-            else:
-                localized_failure = "разрушение зафиксировано; интервал неполон"
-                capacity_kind = "unknown"
-            lines.append(f"- `{row['test_id']}`: {localized_failure}")
-            if capacity_kind == "force":
-                lines.append(
-                    "  - последняя устойчивая нагрузка: "
-                    + format_ru(row["F_last_stable"], resolution=load_resolution, unit="кН")
-                )
-                lines.append(
-                    "  - ступень разрушения: "
-                    + format_ru(row["F_failure_step"], resolution=load_resolution, unit="кН")
-                )
-            elif capacity_kind == "pressure":
-                lines.append(
-                    "  - последнее устойчивое давление: "
-                    + format_ru(row["p_last_stable"], resolution=pressure_resolution, unit="кПа")
-                )
-                lines.append(
-                    "  - давление ступени разрушения: "
-                    + format_ru(row["p_failure_step"], resolution=pressure_resolution, unit="кПа")
-                )
-            if pandas.isna(row["s_failure"]):
-                lines.append("  - осадка при разрушении не измерена; фиктивная точка не создавалась.")
+    analysis_payload = dict(failure_analysis or {})
+    if not analysis_payload:
+        observed = (
+            failures.get("failure_observed", failures.get("failure_reached", pandas.Series(False, index=failures.index)))
+            .fillna(False)
+            .astype(bool)
+        )
+        right = failures.get("right_censored", pandas.Series(False, index=failures.index)).fillna(False).astype(bool)
+        interval = failures.get("interval_censored", observed).fillna(False).astype(bool)
+        analysis_payload = {
+            "contract_version": "failure-analysis/1.0",
+            "summary_method": "none",
+            "point_estimate": None,
+            "n_failure_observed": int(observed.sum()),
+            "n_interval_censored": int(interval.sum()),
+            "n_right_censored": int(right.sum()),
+            "n_indeterminate": int(len(failures) - (interval | right).sum()),
+        }
+    lines.extend(
+        [
+            f"- Контракт: `{analysis_payload.get('contract_version', 'failure-analysis/1.0')}`.",
+            f"- Наблюдавшихся разрушений: {int(analysis_payload.get('n_failure_observed', 0))}.",
+            f"- Интервально цензурированных: {int(analysis_payload.get('n_interval_censored', 0))}.",
+            f"- Правоцензурированных: {int(analysis_payload.get('n_right_censored', 0))}.",
+            f"- Неопределённых, требующих проверки: {int(analysis_payload.get('n_indeterminate', 0))}.",
+            f"- Метод сводной оценки: `{analysis_payload.get('summary_method', 'none')}`.",
+        ]
+    )
+    if analysis_payload.get("point_estimate") is None:
+        lines.append(
+            "- Сводная точечная оценка Fu/pu не рассчитывалась; "
+            "индивидуальные интервалы не усреднялись."
+        )
+    else:
+        lines.append(f"- Сводная точечная оценка: {analysis_payload['point_estimate']}.")
+    lines.extend(
+        [
+            "",
+            "| test_id | тип цензурирования | границы | статус |",
+            "|---|---|---|---|",
+        ]
+    )
+    for _, row in failures.sort_values("test_id", kind="stable").iterrows():
+        kind = _modulus_text(row.get("censoring_type"), "legacy")
+        lower = _finite_float(row.get("lower_bound"))
+        upper = _finite_float(row.get("upper_bound"))
+        unit = _modulus_text(row.get("capacity_unit"), "")
+        if lower is not None and upper is not None:
+            bounds = f"{lower:g} < x ≤ {upper:g} {unit}".strip()
+        elif lower is not None:
+            bounds = f"x > {lower:g} {unit}".strip()
         else:
-            if pandas.notna(row["Fu_lower"]):
-                censor_text = "Fu > " + format_ru(
-                    row["Fu_lower"], resolution=load_resolution, unit="кН"
-                )
+            bounds = "—"
+        status = _modulus_text(row.get("classification_status"), "legacy")
+        lines.append(f"| `{row['test_id']}` | `{kind}` | {bounds} | `{status}` |")
+    lines.append("")
+    for _, row in failures.sort_values("test_id", kind="stable").iterrows():
+        censoring_type = _modulus_text(row.get("censoring_type"), "legacy")
+        capacity_kind = _modulus_text(row.get("capacity_kind"), "unknown")
+        if capacity_kind not in {"force", "pressure"}:
+            capacity_kind = (
+                "pressure"
+                if _finite_float(row.get("pu_lower")) is not None
+                and _finite_float(row.get("Fu_lower")) is None
+                else "force"
+            )
+        lower = _finite_float(row.get("lower_bound"))
+        upper = _finite_float(row.get("upper_bound"))
+        if lower is None:
+            lower = _finite_float(
+                row.get("Fu_lower") if capacity_kind == "force" else row.get("pu_lower")
+            )
+        if upper is None:
+            upper = _finite_float(
+                row.get("Fu_upper") if capacity_kind == "force" else row.get("pu_upper")
+            )
+        resolution = load_resolution if capacity_kind == "force" else pressure_resolution
+        unit = "кН" if capacity_kind == "force" else "кПа"
+        symbol = "Fu" if capacity_kind == "force" else "pu"
+        failure_observed = _modulus_bool(
+            row.get("failure_observed", row.get("failure_reached", False))
+        )
+
+        if censoring_type == "legacy":
+            if failure_observed and lower is not None and upper is not None:
+                censoring_type = "interval_censored"
+            elif not failure_observed and lower is not None:
+                censoring_type = "right_censored"
             else:
-                censor_text = "pu > " + format_ru(
-                    row.get("pu_lower"), resolution=pressure_resolution, unit="кПа"
-                )
-            lines.append(f"- `{row['test_id']}`: {censor_text} (правое цензурирование)")
+                censoring_type = "indeterminate"
+
+        if censoring_type == "interval_censored" and lower is not None and upper is not None:
+            localized_failure = (
+                f"{format_ru(lower, resolution=resolution)} < {symbol} ≤ "
+                f"{format_ru(upper, resolution=resolution, unit=unit)}"
+            )
+            lines.append(f"- `{row['test_id']}`: {localized_failure}")
+            stable_label = (
+                "последняя устойчивая нагрузка"
+                if capacity_kind == "force"
+                else "последнее устойчивое давление"
+            )
+            failure_label = (
+                "ступень разрушения"
+                if capacity_kind == "force"
+                else "давление ступени разрушения"
+            )
+            lines.append(
+                f"  - {stable_label}: "
+                + format_ru(lower, resolution=resolution, unit=unit)
+            )
+            lines.append(
+                f"  - {failure_label}: "
+                + format_ru(upper, resolution=resolution, unit=unit)
+            )
+        elif censoring_type == "right_censored" and lower is not None:
+            censor_text = f"{symbol} > " + format_ru(
+                lower, resolution=resolution, unit=unit
+            )
+            lines.append(
+                f"- `{row['test_id']}`: {censor_text} (правое цензурирование)"
+            )
+        else:
+            lines.append(
+                f"- `{row['test_id']}`: границы Fu/pu не определены; "
+                "требуется инженерная проверка (indeterminate)."
+            )
+            warning = _modulus_text(row.get("classification_warning"), "")
+            if warning:
+                lines.append(f"  - предупреждение классификации: `{warning}`.")
+
+        if failure_observed and pandas.isna(row.get("s_failure")):
+            lines.append(
+                "  - осадка при разрушении не измерена; фиктивная точка не создавалась."
+            )
     if pcr_results:
         lines.extend(["", "## Начальное критическое давление", ""])
         for test_id, result in pcr_results.items():
@@ -338,13 +622,72 @@ def build_markdown_report(
     if moduli is not None and len(moduli):
         lines.extend(["", "## Условный штамповый модуль", ""])
         for _, row in moduli[moduli["method"].isin(["E_regression", "E_secant"])].iterrows():
+            review_status = _modulus_text(row.get("review_status"), "review_required")
+            primary = _modulus_bool(row.get("is_primary")) and review_status == "approved"
+            result_class = "PRIMARY" if primary else "DIAGNOSTIC"
+            resolution_mpa = _modulus_resolution_mpa(row)
+            estimate_kpa = _finite_float(row.get("E_stamp_app_kPa"))
+            estimate_mpa = estimate_kpa / 1000.0 if estimate_kpa is not None else None
+            ci_low_kpa = _finite_float(row.get("ci_low_kPa"))
+            ci_high_kpa = _finite_float(row.get("ci_high_kPa"))
+            ci_text = ""
+            if ci_low_kpa is not None and ci_high_kpa is not None:
+                ci_text = (
+                    "; 95% ДИ "
+                    f"{format_ru(ci_low_kpa / 1000.0, resolution=resolution_mpa)}–"
+                    f"{format_ru(ci_high_kpa / 1000.0, resolution=resolution_mpa, unit='МПа')}"
+                )
+            test_id = _modulus_text(row.get("test_id"), "не указан")
+            p_range_source = _modulus_text(row.get("p_range_source"), "не указан")
+            p_range_origin = _modulus_text(row.get("p_range_origin"), "не указан")
+            profile_source = _modulus_text(row.get("profile_source"), "не указан")
             lines.append(
-                f"- `{row['method']}`: E_stamp_app = "
-                f"{format_ru(row['E_stamp_app_kPa'] / 1000.0, resolution=0.01, unit='МПа')}; "
+                f"- `{test_id}` / `{row['method']}` / `{_modulus_profile(row)}`: "
+                f"**{result_class}**; review_status=`{review_status}`; "
+                "E_stamp_app = "
+                f"{format_ru(estimate_mpa, resolution=resolution_mpa, unit='МПа')}"
+                f"{ci_text}; "
                 f"p={format_ru(row['p_min_kPa'], resolution=0.1)}–{format_ru(row['p_max_kPa'], resolution=0.1)} кПа; "
-                f"n={int(row['n'])}; ν={format_ru(row['nu'], resolution=0.01)}; "
-                f"коэффициент формы={format_ru(row['shape_factor'], resolution=0.01)}."
+                f"источник диапазона=`{p_range_source}` (origin=`{p_range_origin}`); "
+                f"n={int(row['n'])}; ν={format_ru(row['nu'], resolution=0.01)} "
+                f"(source=`{_modulus_text(row.get('nu_source'), 'legacy')}`); "
+                f"коэффициент формы={format_ru(row['shape_factor'], resolution=0.01)} "
+                f"(source=`{_modulus_text(row.get('shape_factor_source'), 'legacy')}`); "
+                f"profile_source=`{profile_source}`; "
+                f"использованные строки={_modulus_used_rows(row.get('used_indices'))}."
             )
+            requested_min = _finite_float(row.get("requested_p_min_kPa"))
+            requested_max = _finite_float(row.get("requested_p_max_kPa"))
+            if requested_min is not None or requested_max is not None:
+                lines.append(
+                    "  - запрошенный диапазон: "
+                    f"{format_ru(requested_min, resolution=0.1)}–"
+                    f"{format_ru(requested_max, resolution=0.1, unit='кПа')}."
+                )
+            methodology_note = _modulus_text(row.get("methodology_note"), "не указано")
+            lines.append(f"  - методическое примечание: {methodology_note}")
+
+    if group_comparisons:
+        lines.extend(["", "## Сравнение групп", ""])
+        rendered_comparisons = 0
+        for comparison in group_comparisons:
+            if not isinstance(comparison, pandas.DataFrame) or comparison.empty:
+                continue
+            row = comparison.iloc[0]
+            baseline_group = row.get("baseline_group", "—")
+            reinforced_group = row.get("reinforced_group", "—")
+            pairing_status = row.get("pairing_status", "unknown")
+            pairing_reason = row.get("pairing_reason", "")
+            pairing_warning = row.get("pairing_warning", "")
+            lines.append(
+                f"- `{baseline_group}` vs `{reinforced_group}`: "
+                f"pairing_status=`{pairing_status}`; pairing_reason=`{pairing_reason or '—'}`."
+            )
+            if pandas.notna(pairing_warning) and str(pairing_warning).strip():
+                lines.append(f"  - Предупреждение: {str(pairing_warning).strip()}")
+            rendered_comparisons += 1
+        if rendered_comparisons == 0:
+            lines.append("- Таблицы сравнения групп отсутствуют.")
     if plot_warnings:
         lines.extend(["", "## Предупреждения графика", ""])
         lines.extend(f"- {warning}" for warning in plot_warnings)
@@ -395,6 +738,18 @@ def build_markdown_report(
                 f"- Время обработки UTC: `{payload.get('processing_timestamp_utc')}`.",
             ]
         )
+        evaluations = payload.get("metrology_evaluations") or []
+        lines.append(f"- Оценок срока поверки: {len(evaluations)}.")
+        for evaluation in evaluations:
+            if not isinstance(evaluation, dict):
+                continue
+            lines.append(
+                f"  - `{evaluation.get('test_id')}` / `{evaluation.get('channel')}`: "
+                f"status=`{evaluation.get('verification_status')}`; "
+                f"evaluation_date={evaluation.get('verification_evaluation_date') or '—'}; "
+                f"source=`{evaluation.get('verification_evaluation_date_source') or 'unknown'}`; "
+                f"rule=`{evaluation.get('verification_evaluation_rule') or '—'}`."
+            )
     return "\n".join(lines)
 
 
@@ -417,10 +772,13 @@ def reproducibility_bundle(
     metadata_file_bytes: bytes | None = None,
     config_snapshot: dict[str, Any] | None = None,
     scope: dict[str, Any] | None = None,
+    additional_root_files: dict[str, bytes] | None = None,
+    additional_files: dict[str, bytes] | None = None,
 ) -> bytes:
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(buffer, "w") as archive:
         manifest: list[dict[str, Any]] = []
+        written_paths: dict[str, str] = {}
 
         def safe_component(value: Any, fallback: str) -> str:
             basename = Path(str(value)).name
@@ -432,7 +790,26 @@ def reproducibility_bundle(
 
         def write(name: str, payload: bytes | str) -> None:
             content = payload.encode("utf-8") if isinstance(payload, str) else payload
-            archive.writestr(name, content)
+            portable_key = name.casefold()
+            if portable_key in written_paths:
+                raise ValueError(
+                    "Duplicate portable reproducibility path: "
+                    f"{written_paths[portable_key]!r} and {name!r}."
+                )
+            for existing_key, existing_name in written_paths.items():
+                if portable_key.startswith(existing_key + "/") or existing_key.startswith(
+                    portable_key + "/"
+                ):
+                    raise ValueError(
+                        "Reproducibility file/directory path collision: "
+                        f"{existing_name!r} and {name!r}."
+                    )
+            written_paths[portable_key] = name
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, content)
             manifest.append(
                 {"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
             )
@@ -454,6 +831,37 @@ def reproducibility_bundle(
         write("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2, default=str))
         write("audit.json", audit.to_json())
         write("report_ru.md", report_markdown.encode("utf-8"))
+        for name, payload in sorted((additional_root_files or {}).items()):
+            safe_name = safe_component(name, "report_artifact.bin")
+            if safe_name.casefold() in {
+                "manifest.json",
+                "metadata.json",
+                "audit.json",
+                "report_ru.md",
+            }:
+                raise ValueError(f"Reserved reproducibility bundle path: {safe_name}.")
+            write(safe_name, bytes(payload))
+        for raw_name, payload in sorted((additional_files or {}).items()):
+            original = unicodedata.normalize("NFC", str(raw_name))
+            if (
+                "\\" in original
+                or ":" in original
+                or any(
+                    unicodedata.category(character).startswith("C")
+                    for character in original
+                )
+            ):
+                raise ValueError(f"Unsafe reproducibility bundle path: {raw_name!r}.")
+            relative = PurePosixPath(original)
+            if (
+                not original
+                or relative.is_absolute()
+                or ".." in relative.parts
+                or any(part in {"", "."} for part in relative.parts)
+                or relative.parts[0].casefold() == "manifest.json"
+            ):
+                raise ValueError(f"Unsafe reproducibility bundle path: {raw_name!r}.")
+            write(relative.as_posix(), bytes(payload))
         if provenance:
             payload = provenance.to_dict() if hasattr(provenance, "to_dict") else dict(provenance)
             write("provenance.json", json.dumps(payload, ensure_ascii=False, indent=2, default=str))
@@ -470,15 +878,21 @@ def reproducibility_bundle(
             ),
         )
         effective_result_tables = dict(result_tables or {})
-        indicator_audit, indicator_events, indicator_passports = _indicator_tables_for_scope(
-            prepared
-        )
+        (
+            indicator_audit,
+            indicator_events,
+            indicator_passports,
+            indicator_aggregation,
+        ) = _indicator_tables_for_scope(prepared)
         effective_result_tables.setdefault("indicator_processing_audit", indicator_audit)
         effective_result_tables.setdefault("indicator_processing_events", indicator_events)
         effective_result_tables.setdefault(
             "indicator_calibration_parameters", indicator_passports
         )
-        for name, table in effective_result_tables.items():
+        effective_result_tables.setdefault(
+            "indicator_aggregation_results", indicator_aggregation
+        )
+        for name, table in sorted(effective_result_tables.items(), key=lambda item: str(item[0])):
             safe_result_name = safe_component(name, "result")
             if hasattr(table, "to_csv"):
                 write(
@@ -490,10 +904,16 @@ def reproducibility_bundle(
                     f"results/{safe_result_name}.json",
                     json.dumps(table, ensure_ascii=False, indent=2, default=str),
                 )
-        for name, payload in (figures or {}).items():
+        for name, payload in sorted((figures or {}).items(), key=lambda item: str(item[0])):
             write(f"figures/{safe_component(name, 'figure.bin')}", payload)
+        manifest_info = zipfile.ZipInfo(
+            "manifest.json", date_time=(1980, 1, 1, 0, 0, 0)
+        )
+        manifest_info.compress_type = zipfile.ZIP_DEFLATED
+        manifest_info.create_system = 3
+        manifest_info.external_attr = 0o100644 << 16
         archive.writestr(
-            "manifest.json",
+            manifest_info,
             json.dumps(
                 {"scope": scope or {}, "files": manifest},
                 ensure_ascii=False,

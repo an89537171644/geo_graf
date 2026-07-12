@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,12 +14,12 @@ import pandas as pd
 import streamlit as st
 
 from soilstamp.analysis import (
+    calculate_moduli_for_test,
     center_and_tilt,
     compare_groups,
     confirm_manual_pcr,
     deformation_work,
     derivative_diagnostics,
-    estimate_moduli,
     fit_segmented_pcr,
     hysteresis_metrics,
     modulus_sensitivity,
@@ -26,10 +27,17 @@ from soilstamp.analysis import (
     time_stabilization,
     value_at_pressure,
 )
+from soilstamp.methodology import (
+    ModulusOverrides,
+    get_modulus_profile,
+    modulus_profile_ids,
+    resolve_modulus_method,
+)
 from soilstamp.data import (
     AuditTrail,
     apply_manual_point_correction,
     apply_settlement_correction,
+    failure_analysis_summary,
     failure_summary,
     prepare_measurements,
 )
@@ -40,6 +48,7 @@ from soilstamp.io import (
     validate_import_metadata_consistency,
 )
 from soilstamp.indicators import (
+    indicator_aggregation_frame,
     indicator_audit_frame,
     indicator_event_frame,
     indicator_passport_frame,
@@ -52,13 +61,26 @@ from soilstamp.gui_manual_entry import (
     render_manual_entry,
 )
 from soilstamp.manual_entry_adapter import adapt_manual_draft
-from soilstamp.plotting import export_figure, plot_curves, plot_stamp_schematic
+from soilstamp.plotting import (
+    export_figure,
+    plot_curves,
+    plot_failure_intervals,
+    plot_stamp_schematic,
+    resolve_curve_selections,
+)
 from soilstamp.provenance import (
     build_provenance,
     effective_conversion_parameters,
+    metrology_evaluations_from_passports,
     passport_completeness,
     validate_project_metadata,
     value_sha256,
+)
+from soilstamp.report_package import (
+    build_approval_report_package,
+    build_formula_and_range_records,
+    build_review_required_registry,
+    collect_approval_artifacts,
 )
 from soilstamp.reporting import build_markdown_report, reproducibility_bundle
 from soilstamp.schema import VERSION, ValidationIssue
@@ -120,6 +142,213 @@ def _scope_indicator_table(table: pd.DataFrame, test_ids: list[str]) -> pd.DataF
         return table.copy()
     selected = {str(value) for value in test_ids}
     return table[table["test_id"].astype(str).isin(selected)].copy()
+
+
+def _metadata_curve_selection_records(metadata: dict) -> list[dict]:
+    payload = metadata.get("publication_curve_selection")
+    if payload is None:
+        return []
+    if isinstance(payload, list):
+        records = payload
+    elif isinstance(payload, dict):
+        version = payload.get("contract_version")
+        if version not in {None, "publication-curve-selection/1.0"}:
+            raise ValueError(
+                "Неподдерживаемая версия publication_curve_selection: "
+                f"{version!r}."
+            )
+        records = payload.get("decisions")
+    else:
+        raise ValueError("publication_curve_selection должен быть объектом или массивом.")
+    if not isinstance(records, list) or not all(isinstance(item, dict) for item in records):
+        raise ValueError("publication_curve_selection.decisions должен быть массивом объектов.")
+    return [dict(item) for item in records]
+
+
+def _decision_records(resolved) -> list[dict]:
+    return [
+        {
+            "group": decision.group,
+            "method": decision.method,
+            "test_id": decision.test_id,
+            "author": decision.author,
+            "timestamp_utc": decision.timestamp_utc,
+            "reason": decision.reason,
+        }
+        for _, decision in sorted(resolved.items())
+    ]
+
+
+def _publication_selection_controls(
+    frame: pd.DataFrame,
+    metadata: dict,
+    *,
+    context_key: str,
+    known_groups: set[str] | None = None,
+) -> list[dict]:
+    """Render and persist explicit per-series publication decisions."""
+
+    stored_by_context = st.session_state.setdefault("publication_curve_decisions", {})
+    stored = stored_by_context.get(context_key)
+    frame_groups = set(frame["group"].dropna().astype(str))
+    repeated_groups = [
+        str(group)
+        for group, part in frame.groupby("group", sort=True)
+        if part["test_id"].astype(str).nunique() > 1
+    ]
+    repeated_group_set = set(repeated_groups)
+    metadata_tests = metadata.get("tests") if isinstance(metadata, dict) else None
+    known_project_groups = frame_groups | set(known_groups or set()) | {
+        str(item.get("group"))
+        for item in (metadata_tests or {}).values()
+        if isinstance(item, dict) and item.get("group") not in (None, "")
+    }
+    supplied_metadata_records = _metadata_curve_selection_records(metadata)
+    supplied_metadata_groups = {
+        str(item.get("group") or "") for item in supplied_metadata_records
+    }
+    unknown_metadata_groups = sorted(supplied_metadata_groups - known_project_groups)
+    if unknown_metadata_groups:
+        raise ValueError(
+            "publication_curve_selection содержит неизвестные группы: "
+            + ", ".join(repr(value) for value in unknown_metadata_groups)
+            + "."
+        )
+    metadata_records = [
+        item
+        for item in supplied_metadata_records
+        if str(item.get("group") or "") in frame_groups
+        and str(item.get("group") or "") in repeated_group_set
+    ]
+    active_records = [
+        item
+        for item in list(stored if stored is not None else metadata_records)
+        if str(item.get("group") or "") in repeated_group_set
+    ]
+    existing = {str(item.get("group")): item for item in active_records}
+    if not repeated_groups:
+        return _decision_records(resolve_curve_selections(frame, None))
+
+    st.markdown("##### Явный выбор кривой для повторных серий")
+    st.caption(
+        "Публикационный режим не выбирает первый test ID. "
+        "Подтвердите способ для каждой серии; ручной представитель требует автора, UTC-времени и причины."
+    )
+    candidates: list[dict] = []
+    method_options = [
+        "— выбрать —",
+        "mean_curve",
+        "median_curve",
+        "manual_representative",
+        "individual_curves",
+    ]
+    for group in repeated_groups:
+        previous = existing.get(group, {})
+        previous_method = str(previous.get("method") or "— выбрать —")
+        index = method_options.index(previous_method) if previous_method in method_options else 0
+        method = st.selectbox(
+            f"Серия {group}",
+            method_options,
+            index=index,
+            key=f"curve_method_{context_key}_{group}",
+        )
+        if method == "— выбрать —":
+            continue
+        record: dict = {"group": group, "method": method}
+        if method == "manual_representative":
+            tests = sorted(
+                frame.loc[frame["group"].astype(str).eq(group), "test_id"]
+                .dropna()
+                .astype(str)
+                .unique()
+                .tolist()
+            )
+            previous_test = str(previous.get("test_id") or tests[0])
+            columns = st.columns(2)
+            record["test_id"] = columns[0].selectbox(
+                f"Представитель {group}",
+                tests,
+                index=tests.index(previous_test) if previous_test in tests else 0,
+                key=f"curve_test_{context_key}_{group}",
+            )
+            record["author"] = columns[1].text_input(
+                f"Автор выбора {group}",
+                value=str(previous.get("author") or ""),
+                key=f"curve_author_{context_key}_{group}",
+            )
+            record["timestamp_utc"] = st.text_input(
+                f"UTC-время выбора {group}",
+                value=str(
+                    previous.get("timestamp_utc")
+                    or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                ),
+                key=f"curve_time_{context_key}_{group}",
+            )
+            record["reason"] = st.text_area(
+                f"Причина выбора {group}",
+                value=str(previous.get("reason") or ""),
+                key=f"curve_reason_{context_key}_{group}",
+            )
+        candidates.append(record)
+
+    if st.button("Подтвердить выбор публикационных кривых", key=f"confirm_curves_{context_key}"):
+        try:
+            normalized = _decision_records(resolve_curve_selections(frame, candidates))
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            stored_by_context[context_key] = normalized
+            stored = normalized
+            for decision in normalized:
+                prior = existing.get(str(decision["group"]))
+                if decision == prior:
+                    continue
+                st.session_state.audit.record(
+                    "select_publication_curve",
+                    scope=str(decision["group"]),
+                    reason=str(
+                        decision.get("reason")
+                        or "Явно подтверждён способ публикационного представления серии"
+                    ),
+                    parameters={
+                        "contract_version": "publication-curve-selection/1.0",
+                        **decision,
+                    },
+                    before=prior,
+                    after=decision,
+                    user=str(decision.get("author") or "local-user"),
+                    method=str(decision["method"]),
+                )
+            st.session_state.bundle_cache = {}
+            st.success("Выбор кривых сохранён в журнале текущей ревизии.")
+            active_records = normalized
+
+    if stored is None and metadata_records:
+        audit_key = f"{context_key}:metadata"
+        audited = st.session_state.setdefault("publication_decisions_audited", set())
+        normalized = _decision_records(
+            resolve_curve_selections(frame, metadata_records)
+        )
+        if audit_key not in audited:
+            for decision in normalized:
+                st.session_state.audit.record(
+                    "load_publication_curve_selection",
+                    scope=str(decision["group"]),
+                    reason=str(
+                        decision.get("reason")
+                        or "Явный выбор загружен из metadata проекта"
+                    ),
+                    parameters={
+                        "contract_version": "publication-curve-selection/1.0",
+                        "source": "metadata.publication_curve_selection",
+                        **decision,
+                    },
+                    user=str(decision.get("author") or "metadata"),
+                    method=str(decision["method"]),
+                )
+            audited.add(audit_key)
+        active_records = normalized
+    return active_records
 
 
 def _issue_frame(issues) -> pd.DataFrame:
@@ -208,7 +437,10 @@ def _reset_for_dataset(key: str, raw: pd.DataFrame, input_context: dict) -> None
     st.session_state.pcr_results = {}
     st.session_state.pcr_latest = {}
     st.session_state.analysis_tables = {}
+    st.session_state.e_latest = {}
     st.session_state.figure_exports = {}
+    st.session_state.publication_curve_decisions = {}
+    st.session_state.publication_decisions_audited = set()
     st.session_state.bundle_cache = {}
     st.session_state.processing_provenance = {}
     st.session_state.revision = 0
@@ -704,6 +936,10 @@ try:
     indicator_processing_audit = indicator_audit_frame(base_prepared)
     indicator_processing_events = indicator_event_frame(base_prepared)
     indicator_calibration_parameters = indicator_passport_frame(base_prepared)
+    indicator_aggregation_results = indicator_aggregation_frame(base_prepared)
+    input_context["provenance"].metrology_evaluations = (
+        metrology_evaluations_from_passports(indicator_calibration_parameters)
+    )
     # Pandas deep-copies attrs through most analysis operations.  Keep the
     # sizeable indicator artefacts in dedicated frames and use an attrs-free
     # working layer; they are reattached only to the report snapshot below.
@@ -769,6 +1005,9 @@ selected_indicator_events = _scope_indicator_table(
 )
 selected_indicator_passports = _scope_indicator_table(
     indicator_calibration_parameters, selected_tests
+)
+selected_indicator_aggregation = _scope_indicator_table(
+    indicator_aggregation_results, selected_tests
 )
 
 st.title(f"Soil Stamp Antonov {VERSION}")
@@ -870,6 +1109,13 @@ with tabs[0]:
             "zero_correction_mm",
             "verification_date",
             "verification_valid_until",
+            "verification_status",
+            "verification_evaluation_date",
+            "verification_evaluation_date_source",
+            "verification_evaluation_rule",
+            "x_mm",
+            "y_mm",
+            "assignment_status",
             "max_increment_mm",
             "reverse_tolerance_mm",
             "travel_range_mm",
@@ -963,6 +1209,47 @@ with tabs[0]:
                     width="stretch",
                     hide_index=True,
                 )
+    st.subheader("Агрегация осадки")
+    st.caption(
+        "Фиксированный состав required/used/missing и результат политики для каждой строки."
+    )
+    if selected_indicator_aggregation.empty:
+        st.info("Осадка по индикаторным каналам для выбранных испытаний не формировалась.")
+    else:
+        aggregation_columns = [
+            "test_id",
+            "row_index",
+            "sequence_index",
+            "aggregation_method",
+            "channels_required",
+            "channels_used",
+            "missing_channels",
+            "aggregation_status",
+            "plane_rank",
+            "plane_residual_rms_mm",
+            "tilt_magnitude_mm_per_mm",
+            "tilt_direction_deg",
+            "tilt_direction_resolved",
+        ]
+        st.dataframe(
+            _display_safe_frame(
+                selected_indicator_aggregation[
+                    [
+                        column
+                        for column in aggregation_columns
+                        if column in selected_indicator_aggregation
+                    ]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        st.download_button(
+            "Скачать indicator_aggregation_results.csv",
+            selected_indicator_aggregation.to_csv(index=False).encode("utf-8-sig"),
+            "indicator_aggregation_results.csv",
+            "text/csv",
+        )
     st.subheader("Provenance")
     st.json(input_context["provenance"].to_dict(), expanded=False)
     if len(input_context["raw_cells"]):
@@ -1069,6 +1356,7 @@ with tabs[1]:
             st.session_state.pcr_results = {}
             st.session_state.pcr_latest = {}
             st.session_state.analysis_tables = {}
+            st.session_state.e_latest = {}
             st.session_state.figure_exports = {}
             st.session_state.bundle_cache = {}
             st.success("Новая ревизия записана в audit trail.")
@@ -1117,6 +1405,7 @@ with tabs[1]:
                 st.session_state.pcr_results = {}
                 st.session_state.pcr_latest = {}
                 st.session_state.analysis_tables = {}
+                st.session_state.e_latest = {}
                 st.session_state.figure_exports = {}
                 st.session_state.bundle_cache = {}
                 st.success("Коррекция добавлена как новая ревизия; raw не изменён.")
@@ -1125,6 +1414,55 @@ with tabs[1]:
                 st.error(str(exc))
 
 with tabs[2]:
+    selected_failures = failures[failures["test_id"].astype(str).isin(selected_tests)].copy()
+    failure_analysis = failure_analysis_summary(selected_failures)
+    st.markdown("#### Индивидуальные интервалы разрушения")
+    failure_metrics = st.columns(4)
+    failure_metrics[0].metric(
+        "Наблюдалось разрушений", failure_analysis["n_failure_observed"]
+    )
+    failure_metrics[1].metric(
+        "Интервально ценз.", failure_analysis["n_interval_censored"]
+    )
+    failure_metrics[2].metric(
+        "Правоценз.", failure_analysis["n_right_censored"]
+    )
+    failure_metrics[3].metric(
+        "Требует проверки", failure_analysis["n_review_required"]
+    )
+    st.caption(
+        "failure-analysis/1.0 · summary_method=none · "
+        "сводная точечная оценка Fu/pu не рассчитывается"
+    )
+    st.dataframe(_display_safe_frame(selected_failures), hide_index=True, width="stretch")
+    available_capacity_kinds = {
+        value
+        for value in selected_failures.get("capacity_kind", pd.Series(dtype=str))
+        .dropna()
+        .astype(str)
+        if value in {"force", "pressure"}
+    }
+    failure_axis_options = [
+        value for value in ("force", "pressure") if value in available_capacity_kinds
+    ] or ["force", "pressure"]
+    failure_axis = st.selectbox(
+        "Ось диаграммы разрушения",
+        failure_axis_options,
+        key="failure_interval_axis",
+    )
+    failure_analysis["plot_capacity_axis"] = failure_axis
+    failure_plot_output = None
+    try:
+        failure_plot_output = plot_failure_intervals(
+            selected_failures,
+            capacity_axis=failure_axis,
+        )
+        st.pyplot(failure_plot_output.figure, width="stretch")
+        st.caption(failure_plot_output.caption)
+    except ValueError as exc:
+        st.warning(f"Диаграмма интервалов недоступна: {exc}")
+
+    st.divider()
     controls = st.columns([1.25, 1.15, 1.0, 1.0])
     graph_mode = controls[0].selectbox(
         "Режим",
@@ -1171,6 +1509,28 @@ with tabs[2]:
         diagnostic_result = st.session_state.pcr_results.get(latest_key) if latest_key else None
     else:
         graph_data = filtered
+    curve_selection_records: list[dict] = []
+    if graph_mode == "antonov_publication":
+        selection_context = hashlib.sha1(
+            json.dumps(
+                {
+                    "dataset": dataset_key,
+                    "revision": st.session_state.revision,
+                    "correction_mode": correction_mode,
+                    "tests": sorted(selected_tests),
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()[:12]
+        try:
+            curve_selection_records = _publication_selection_controls(
+                graph_data,
+                metadata,
+                context_key=selection_context,
+                known_groups=set(prepared["group"].dropna().astype(str)),
+            )
+        except ValueError as exc:
+            st.error(f"Выбор публикационных кривых некорректен: {exc}")
     try:
         plot_output = plot_curves(
             graph_data,
@@ -1183,6 +1543,11 @@ with tabs[2]:
             pcr_result=diagnostic_result,
             bootstrap=int(bootstrap_graph),
             seed=202604,
+            selections=(
+                curve_selection_records
+                if graph_mode == "antonov_publication"
+                else None
+            ),
         )
         for warning in plot_output.warnings:
             st.warning(warning)
@@ -1200,6 +1565,10 @@ with tabs[2]:
             "major": major_step,
             "minor": minor_step,
             "bootstrap": int(bootstrap_graph),
+            "curve_selections": plot_output.selection_records,
+            "plotted_point_rows": len(plot_output.plotted_points),
+            "failure_analysis": failure_analysis,
+            "failure_axis": failure_axis,
             "pcr": diagnostic_result.to_dict() if diagnostic_result is not None else None,
         }
         export_key = hashlib.sha1(
@@ -1261,6 +1630,7 @@ with tabs[3]:
                     test_frame, bootstrap=int(bootstrap_n), seed=int(seed)
                 )
                 st.session_state.pcr_latest[result_context] = result_key
+                st.session_state.e_latest.pop(result_context, None)
                 st.session_state.bundle_cache = {}
         except Exception as exc:
             st.error(f"pcr не рассчитано: {exc}")
@@ -1287,17 +1657,25 @@ with tabs[3]:
             st.json(pcr_result.to_dict())
         with st.form("manual_pcr_form"):
             manual_pcr_value = st.number_input("Подтверждённое pcr, кПа", value=float(pcr_result.pcr_auto))
+            manual_pcr_author = st.text_input(
+                "Автор подтверждения pcr",
+                value=str((metadata.get("project_passport") or {}).get("operator") or ""),
+            )
             manual_pcr_reason = st.text_input("Обоснование ручного решения", key="pcr_reason")
             confirm_pcr = st.form_submit_button("Сохранить рядом с автоматическим")
         if confirm_pcr:
             try:
+                if not str(manual_pcr_author).strip():
+                    raise ValueError("Для подтверждения pcr укажите автора решения.")
                 st.session_state.pcr_results[result_key] = confirm_manual_pcr(
                     pcr_result,
                     manual_pcr_value,
                     reason=manual_pcr_reason,
                     audit=st.session_state.audit,
                     scope=analysis_test,
+                    user=str(manual_pcr_author).strip(),
                 )
+                st.session_state.e_latest.pop(result_context, None)
                 st.session_state.bundle_cache = {}
                 st.success("Автоматический результат сохранён; ручное подтверждение добавлено отдельно.")
                 st.rerun()
@@ -1314,24 +1692,109 @@ with tabs[3]:
     ]
     if finite_p.nunique() >= 2:
         pmin_data, pmax_data = float(finite_p.min()), float(finite_p.max())
-        e_controls = st.columns(4)
-        p_range = e_controls[0].slider(
-            "Диапазон p, кПа",
-            min_value=pmin_data,
-            max_value=pmax_data,
-            value=(pmin_data, pmax_data),
+        try:
+            base_e_resolution = resolve_modulus_method(
+                metadata,
+                analysis_test,
+                pcr_result=pcr_result,
+                available_p_range=(pmin_data, pmax_data),
+            )
+        except ValueError as exc:
+            st.warning(f"Metadata методики E требует исправления: {exc}")
+            base_e_resolution = resolve_modulus_method(
+                {}, analysis_test, available_p_range=(pmin_data, pmax_data)
+            )
+        profile_options = list(modulus_profile_ids())
+        profile_index = (
+            profile_options.index(base_e_resolution.profile_id)
+            if base_e_resolution.profile_id in profile_options
+            else profile_options.index("diagnostic_unapproved_v1")
         )
-        nu = e_controls[1].number_input("ν", min_value=0.0, max_value=0.49, value=float(metadata.get("poisson_ratio", 0.30)), step=0.01)
-        shape_factor = e_controls[2].number_input("Коэффициент формы", min_value=0.01, value=float(metadata.get("shape_factor", 1.0)), step=0.05)
-        calculate_e = e_controls[3].button("Рассчитать E", width="stretch")
+        resolved_p_range = (
+            float(base_e_resolution.p_min_kpa),
+            float(base_e_resolution.p_max_kpa),
+        )
+        if not (
+            pmin_data <= resolved_p_range[0] < resolved_p_range[1] <= pmax_data
+        ):
+            resolved_p_range = (pmin_data, pmax_data)
+        with st.form(f"modulus_method_form:{analysis_test}"):
+            method_controls = st.columns(3)
+            method_profile = method_controls[0].selectbox(
+                "Профиль методики E",
+                profile_options,
+                index=profile_index,
+            )
+            range_source_options = ["explicit", "accepted_pcr", "project_profile"]
+            source_index = (
+                range_source_options.index(base_e_resolution.p_range_source)
+                if base_e_resolution.p_range_source in range_source_options
+                else 0
+            )
+            e_range_source = method_controls[1].selectbox(
+                "Источник диапазона E",
+                range_source_options,
+                index=source_index,
+            )
+            p_range = method_controls[2].slider(
+                "Диапазон p, кПа",
+                min_value=pmin_data,
+                max_value=pmax_data,
+                value=resolved_p_range,
+            )
+            selected_profile = get_modulus_profile(method_profile)
+            coefficient_controls = st.columns(2)
+            nu_default = (
+                float(selected_profile.nu)
+                if selected_profile.nu is not None
+                else float(base_e_resolution.nu)
+            )
+            shape_default = (
+                float(selected_profile.shape_factor)
+                if selected_profile.shape_factor is not None
+                else float(base_e_resolution.shape_factor)
+            )
+            nu = coefficient_controls[0].number_input(
+                "ν", min_value=0.0, max_value=0.49, value=nu_default, step=0.01
+            )
+            shape_factor = coefficient_controls[1].number_input(
+                "Коэффициент формы", min_value=0.01, value=shape_default, step=0.05
+            )
+            confirm_e_range = st.checkbox(
+                "Подтверждаю диапазон и параметры для условного E_stamp_app"
+            )
+            approval_controls = st.columns(2)
+            passport_operator = str(
+                (metadata.get("project_passport") or {}).get("operator") or ""
+            )
+            e_range_author = approval_controls[0].text_input(
+                "Автор решения", value=passport_operator
+            )
+            e_range_reason = approval_controls[1].text_input("Обоснование решения")
+            calculate_e = st.form_submit_button("Рассчитать E", width="stretch")
         e_spec = {
             "dataset": dataset_key,
             "revision": st.session_state.revision,
             "correction_mode": correction_mode,
             "test_id": analysis_test,
-            "p_range": [float(p_range[0]), float(p_range[1])],
+            "method_profile": method_profile,
+            "p_range_source": e_range_source,
+            "proposed_p_range": [float(p_range[0]), float(p_range[1])],
             "nu": float(nu),
             "shape_factor": float(shape_factor),
+            "confirmed": bool(confirm_e_range),
+            "approval_author": str(e_range_author).strip(),
+            "approval_reason": str(e_range_reason).strip(),
+            "accepted_pcr": (
+                {
+                    "value_kPa": pcr_result.pcr_manual,
+                    "author": pcr_result.manual_author,
+                    "confirmed_at_utc": pcr_result.manual_confirmed_at_utc,
+                    "reason": pcr_result.manual_reason,
+                }
+                if pcr_result is not None and pcr_result.pcr_manual is not None
+                else None
+            ),
             "bootstrap": int(bootstrap_n),
             "seed": int(seed),
         }
@@ -1340,28 +1803,99 @@ with tabs[3]:
         ).hexdigest()
         if calculate_e:
             try:
-                e_result = estimate_moduli(
+                approved_at = (
+                    datetime.now(timezone.utc).isoformat()
+                    if confirm_e_range
+                    and str(e_range_author).strip()
+                    and str(e_range_reason).strip()
+                    else None
+                )
+                profile_changed = method_profile != base_e_resolution.profile_id
+                nu_override = (
+                    None
+                    if not profile_changed
+                    and abs(float(nu) - float(base_e_resolution.nu)) < 1e-12
+                    else float(nu)
+                )
+                shape_override = (
+                    None
+                    if not profile_changed
+                    and abs(
+                        float(shape_factor) - float(base_e_resolution.shape_factor)
+                    )
+                    < 1e-12
+                    else float(shape_factor)
+                )
+                manual_decision = ModulusOverrides(
+                    profile_id=method_profile if profile_changed else None,
+                    p_range_kpa=(
+                        (float(p_range[0]), float(p_range[1]))
+                        if confirm_e_range and e_range_source != "project_profile"
+                        else None
+                    ),
+                    p_range_source=e_range_source if confirm_e_range else None,
+                    nu=nu_override,
+                    shape_factor=shape_override,
+                    approval_status="approved" if approved_at else None,
+                    author=str(e_range_author).strip() or None,
+                    timestamp_utc=approved_at,
+                    reason=str(e_range_reason).strip() or None,
+                )
+                e_result = calculate_moduli_for_test(
                     test_frame,
-                    p_min_kpa=p_range[0],
-                    p_max_kpa=p_range[1],
-                    nu=float(nu),
-                    shape_factor=float(shape_factor),
+                    metadata,
+                    analysis_test,
+                    manual_confirmation=manual_decision,
+                    pcr_result=pcr_result,
                     bootstrap=int(bootstrap_n),
                     seed=int(seed),
                 )
                 e_result.insert(0, "test_id", analysis_test)
+                e_spec["resolved_methodology"] = e_result.attrs.get(
+                    "modulus_resolution", {}
+                )
                 e_result.attrs["analysis_spec"] = e_spec
                 st.session_state.analysis_tables[e_key] = e_result
+                st.session_state.e_latest[result_context] = e_key
+                resolved = e_result.attrs.get("modulus_resolution", {})
+                st.session_state.audit.record(
+                    "resolve_modulus_method",
+                    scope=analysis_test,
+                    reason=str(e_range_reason).strip() or "Проверка методического контракта E",
+                    parameters=resolved,
+                    user=str(e_range_author).strip() or "local-user",
+                    method="manual_confirmation" if confirm_e_range else "methodology_resolver",
+                )
                 st.session_state.bundle_cache = {}
             except Exception as exc:
                 st.error(f"Модуль не рассчитан: {exc}")
         moduli = st.session_state.analysis_tables.get(e_key)
         if moduli is not None:
-            primary = moduli[moduli["method"].isin(["E_regression", "E_secant"])]
-            st.dataframe(primary, width="stretch", hide_index=True)
-            with st.expander("E_tangent и E_incremental_diagnostic"):
-                st.dataframe(moduli[~moduli.index.isin(primary.index)], width="stretch", hide_index=True)
-            regression_row = primary[primary["method"] == "E_regression"].iloc[0]
+            resolved = moduli.attrs.get("modulus_resolution", {})
+            st.caption(
+                f"Профиль: {resolved.get('profile_id', '—')}@"
+                f"{resolved.get('profile_version', '—')}; статус: "
+                f"{resolved.get('review_status', 'review_required')}; "
+                f"диапазон: {resolved.get('p_range_source', '—')}."
+            )
+            primary = moduli[moduli["is_primary"].fillna(False).astype(bool)]
+            headline = moduli[moduli["method"].isin(["E_regression", "E_secant"])]
+            if primary.empty:
+                st.warning(
+                    "Основной E не выдан: результат является диагностическим и требует "
+                    "инженерной проверки методики/диапазона."
+                )
+                st.dataframe(headline, width="stretch", hide_index=True)
+            else:
+                st.success("Основной условный E рассчитан по подтверждённому контракту.")
+                st.dataframe(primary, width="stretch", hide_index=True)
+            with st.expander("Дополнительные и диагностические результаты E"):
+                st.dataframe(
+                    moduli[~moduli.index.isin(primary.index)],
+                    width="stretch",
+                    hide_index=True,
+                )
+            regression_row = moduli[moduli["method"] == "E_regression"].iloc[0]
             sensitivity = modulus_sensitivity(
                 regression_row["slope_m_per_kPa"] * 1000.0,
                 float(test_frame["D_mm"].dropna().iloc[0]),
@@ -1414,6 +1948,18 @@ with tabs[4]:
         comparison = st.session_state.analysis_tables.get(comparison_key)
         if comparison is not None:
             st.dataframe(comparison, width="stretch", hide_index=True)
+            pairing_warnings: list[str] = []
+            if "pairing_warning" in comparison:
+                pairing_warnings.extend(
+                    str(value).strip()
+                    for value in comparison["pairing_warning"].dropna().unique()
+                    if str(value).strip()
+                )
+            attr_warning = comparison.attrs.get("pairing_warning")
+            if attr_warning is not None and str(attr_warning).strip():
+                pairing_warnings.append(str(attr_warning).strip())
+            for warning in dict.fromkeys(pairing_warnings):
+                st.warning(warning)
             fig, axes = plt.subplots(2, 1, figsize=(7.2, 6.2), sharex=True, constrained_layout=True)
             axes[0].plot(comparison["p_kPa"], comparison["k_s"], color="black", marker="o", markerfacecolor="white")
             axes[0].fill_between(
@@ -1488,40 +2034,46 @@ with tabs[6]:
         latest_key = st.session_state.pcr_latest.get(context)
         if latest_key and latest_key in st.session_state.pcr_results:
             pcr_by_test[test_id] = st.session_state.pcr_results[latest_key]
-    e_tables = [
-        value
-        for value in st.session_state.analysis_tables.values()
-        if isinstance(value, pd.DataFrame)
-        and value.attrs.get("analysis_spec", {}).get("dataset") == dataset_key
-        and value.attrs.get("analysis_spec", {}).get("revision") == st.session_state.revision
-        and value.attrs.get("analysis_spec", {}).get("correction_mode") == correction_mode
-        and value.attrs.get("analysis_spec", {}).get("test_id") in selected_tests
-    ]
+    e_tables = []
+    for test_id in selected_tests:
+        context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{test_id}"
+        latest_e_key = st.session_state.e_latest.get(context)
+        latest_e = st.session_state.analysis_tables.get(latest_e_key)
+        if isinstance(latest_e, pd.DataFrame):
+            e_tables.append(latest_e)
     report_moduli = pd.concat(e_tables, ignore_index=True) if e_tables else None
     current_caption = plot_output.caption if "plot_output" in locals() and plot_output is not None else None
     current_warnings = plot_output.warnings if "plot_output" in locals() and plot_output is not None else []
 
-    def analysis_table_in_scope(analysis_table) -> bool:
+    def analysis_table_in_scope(analysis_key, analysis_table) -> bool:
         if not isinstance(analysis_table, pd.DataFrame):
             return False
         spec = analysis_table.attrs.get("analysis_spec", {})
         spec_tests = spec.get("selected_tests", [spec.get("test_id")])
-        return bool(
+        in_scope = bool(
             spec.get("dataset") == dataset_key
             and spec.get("revision") == st.session_state.revision
             and spec.get("correction_mode") == correction_mode
             and set(filter(None, spec_tests)).issubset(set(selected_tests))
         )
+        if not in_scope or not str(analysis_key).startswith("E:"):
+            return in_scope
+        test_id = spec.get("test_id")
+        context = f"{dataset_key}:{st.session_state.revision}:{correction_mode}:{test_id}"
+        return st.session_state.e_latest.get(context) == analysis_key
 
     analysis_specs_for_provenance = []
+    report_group_comparisons = []
     for analysis_key, analysis_table in st.session_state.analysis_tables.items():
-        if analysis_table_in_scope(analysis_table):
+        if analysis_table_in_scope(analysis_key, analysis_table):
             analysis_specs_for_provenance.append(
                 {
                     "key": analysis_key,
                     "spec": analysis_table.attrs.get("analysis_spec", {}),
                 }
             )
+            if str(analysis_key).startswith("CMP:"):
+                report_group_comparisons.append(analysis_table)
     processing_config = {
         "import": input_context["provenance_config"],
         "manual_draft_sha256": input_context.get("manual_draft_sha256"),
@@ -1534,6 +2086,8 @@ with tabs[6]:
         "manual_overrides": st.session_state.manual_overrides,
         "selected_tests": sorted(selected_tests),
         "graph": locals().get("export_spec"),
+        "failure_analysis": failure_analysis,
+        "failure_axis": failure_axis,
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "analysis_specs": analysis_specs_for_provenance,
         "target_pressure_kPa": float(target_p),
@@ -1557,6 +2111,9 @@ with tabs[6]:
             metadata_source=input_context["metadata_file_bytes"],
             config=processing_config,
             project_root=BASE_DIR,
+            metrology_evaluations=metrology_evaluations_from_passports(
+                selected_indicator_passports
+            ),
         )
     processing_provenance = st.session_state.processing_provenance[processing_config_key]
     report_prepared = filtered.copy(deep=False)
@@ -1569,6 +2126,9 @@ with tabs[6]:
     report_prepared.attrs["indicator_calibration_parameters"] = (
         selected_indicator_passports.to_dict(orient="records")
     )
+    report_prepared.attrs["indicator_aggregation_results"] = (
+        selected_indicator_aggregation.to_dict(orient="records")
+    )
     report = build_markdown_report(
         metadata=metadata,
         prepared=report_prepared,
@@ -1576,6 +2136,7 @@ with tabs[6]:
         failures=failures[failures["test_id"].isin(selected_tests)],
         pcr_results=pcr_by_test,
         moduli=report_moduli,
+        group_comparisons=report_group_comparisons,
         figure_caption=current_caption,
         plot_warnings=current_warnings,
         audit=st.session_state.audit,
@@ -1584,6 +2145,17 @@ with tabs[6]:
         import_info=import_info,
         source_test_ids=raw["test_id"].dropna().astype(str).unique().tolist(),
         source_row_count=len(raw),
+        failure_analysis=failure_analysis,
+        curve_selections=(
+            plot_output.selection_records
+            if "plot_output" in locals() and plot_output is not None
+            else []
+        ),
+        plotted_curve_points=(
+            plot_output.plotted_points
+            if "plot_output" in locals() and plot_output is not None
+            else pd.DataFrame()
+        ),
     )
     st.subheader("Отчёт")
     st.markdown(report)
@@ -1591,6 +2163,17 @@ with tabs[6]:
 
     result_tables = {
         "failure_summary": failures[failures["test_id"].isin(selected_tests)],
+        "failure_analysis": failure_analysis,
+        "curve_selections": pd.DataFrame(
+            plot_output.selection_records
+            if "plot_output" in locals() and plot_output is not None
+            else []
+        ),
+        "plotted_curve_points": (
+            plot_output.plotted_points
+            if "plot_output" in locals() and plot_output is not None
+            else pd.DataFrame()
+        ),
         "audit": st.session_state.audit.to_frame(),
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "derivatives": derivatives,
@@ -1608,6 +2191,7 @@ with tabs[6]:
         "indicator_processing_audit": selected_indicator_audit,
         "indicator_processing_events": selected_indicator_events,
         "indicator_calibration_parameters": selected_indicator_passports,
+        "indicator_aggregation_results": selected_indicator_aggregation,
     }
     manual_draft_payload = input_context.get("manual_draft")
     if isinstance(manual_draft_payload, dict):
@@ -1626,7 +2210,7 @@ with tabs[6]:
     analysis_manifest = {}
     for name, table in st.session_state.analysis_tables.items():
         spec = table.attrs.get("analysis_spec", {}) if isinstance(table, pd.DataFrame) else {}
-        if analysis_table_in_scope(table):
+        if analysis_table_in_scope(name, table):
             safe_name = hashlib.sha1(name.encode()).hexdigest()[:10]
             result_tables[f"analysis_{safe_name}"] = table
             analysis_manifest[f"analysis_{safe_name}"] = spec
@@ -1638,6 +2222,8 @@ with tabs[6]:
         "tests": selected_tests,
         "caption": current_caption,
         "graph": locals().get("export_spec"),
+        "failure_analysis": failure_analysis,
+        "failure_axis": failure_axis,
         "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
         "analysis_manifest": analysis_manifest,
         "target_pressure_kPa": float(target_p),
@@ -1667,6 +2253,129 @@ with tabs[6]:
                     "current.pdf": graph_exports["pdf"],
                     "current_600dpi.png": graph_exports["png"],
                 }
+            if "failure_plot_output" in locals() and failure_plot_output is not None:
+                figure_payloads.update(
+                    {
+                        "failure_intervals.svg": export_figure(
+                            failure_plot_output.figure, "svg"
+                        ),
+                        "failure_intervals.pdf": export_figure(
+                            failure_plot_output.figure, "pdf"
+                        ),
+                        "failure_intervals_600dpi.png": export_figure(
+                            failure_plot_output.figure, "png"
+                        ),
+                    }
+                )
+            selected_failures = failures[failures["test_id"].isin(selected_tests)]
+            additional_review = []
+            if isinstance(manual_draft_payload, dict):
+                additional_review.append(
+                    {
+                        "message": (
+                            "Manual-entry source requires engineering verification before approval."
+                        )
+                    }
+                )
+            review_registry = build_review_required_registry(
+                passport_status=passport_completeness(metadata, selected_tests),
+                qc_issues=all_issues,
+                indicator_passports=selected_indicator_passports,
+                indicator_audit=selected_indicator_audit,
+                indicator_aggregation=selected_indicator_aggregation,
+                failures=selected_failures,
+                moduli=report_moduli,
+                group_comparisons=report_group_comparisons,
+                additional=additional_review,
+            )
+            conversion_parameters = pd.DataFrame(
+                effective_conversion_parameters(metadata, selected_tests)
+            )
+            pcr_report_values = {
+                key: value.to_dict() for key, value in pcr_by_test.items()
+            }
+            formula_records = build_formula_and_range_records(
+                conversion_parameters=conversion_parameters,
+                indicator_passports=selected_indicator_passports,
+                modulus_profiles=[
+                    get_modulus_profile(profile_id).to_dict()
+                    for profile_id in modulus_profile_ids()
+                ],
+                moduli=report_moduli,
+                pcr_results=pcr_report_values,
+            )
+            approval_artifacts = collect_approval_artifacts(
+                raw=raw,
+                prepared=report_prepared,
+                source_file_name=input_context["source_file_name"],
+                source_file_bytes=input_context["source_file_bytes"],
+                metadata_file_name=input_context["metadata_file_name"],
+                metadata_file_bytes=input_context["metadata_file_bytes"],
+                result_tables=result_tables,
+                figures=figure_payloads,
+                audit=st.session_state.audit,
+                provenance=processing_provenance,
+                report_markdown=report,
+                config_snapshot=processing_config,
+            )
+            approval_package = build_approval_report_package(
+                artifacts=approval_artifacts,
+                metadata=metadata,
+                raw=raw,
+                prepared=report_prepared,
+                indicator_passports=selected_indicator_passports,
+                indicator_audit=selected_indicator_audit,
+                qc_issues=[item.to_dict() for item in all_issues],
+                failures=selected_failures,
+                pcr_results=pcr_report_values,
+                moduli=report_moduli,
+                group_comparisons=report_group_comparisons,
+                audit=st.session_state.audit,
+                provenance=processing_provenance,
+                methodology={
+                    "modulus_method_profiles": [
+                        get_modulus_profile(profile_id).to_dict()
+                        for profile_id in modulus_profile_ids()
+                    ],
+                    "failure_analysis": failure_analysis,
+                    "publication_curve_selection_contract": (
+                        "publication-curve-selection/1.0"
+                    ),
+                },
+                formulas=formula_records,
+                display_rounding={"default": 6},
+                review_required=review_registry,
+                result_tables=result_tables,
+                title=f"Soil Stamp approval report — {metadata.get('project_id', 'project')}",
+                scope={
+                    "source_test_ids": raw["test_id"].dropna().astype(str).unique().tolist(),
+                    "selected_test_ids": sorted(selected_tests),
+                    "excluded_test_ids": sorted(
+                        set(raw["test_id"].dropna().astype(str)) - set(selected_tests)
+                    ),
+                    "source_rows": len(raw),
+                    "prepared_rows": len(report_prepared),
+                },
+            )
+            report_package_files = {
+                "report.html": approval_package.html,
+                "report.xlsx": approval_package.xlsx,
+                "artifact_manifest.json": approval_package.artifact_manifest_json,
+                "approval_report.zip": approval_package.archive,
+            }
+            embedded_report_files = {
+                **{
+                    f"approval/{relative_path}": payload
+                    for relative_path, payload in approval_artifacts.items()
+                },
+                **{
+                    f"approval/{name}": payload
+                    for name, payload in report_package_files.items()
+                },
+            }
+            st.session_state.setdefault("report_package_cache", {})[bundle_key] = (
+                report_package_files
+            )
             st.session_state.bundle_cache[bundle_key] = reproducibility_bundle(
                 raw=raw,
                 prepared=filtered,
@@ -1681,6 +2390,8 @@ with tabs[6]:
                     "correction_mode": correction_mode,
                     "selected_tests": selected_tests,
                     "graph": locals().get("export_spec"),
+                    "failure_analysis": failure_analysis,
+                    "failure_axis": failure_axis,
                     "pcr": {key: value.to_dict() for key, value in pcr_by_test.items()},
                     "analysis_manifest": analysis_manifest,
                     "target_pressure_kPa": float(target_p),
@@ -1702,7 +2413,37 @@ with tabs[6]:
                     "source_rows": len(raw),
                     "prepared_rows": len(filtered),
                 },
+                additional_files=embedded_report_files,
             )
+    cached_report_package = st.session_state.get("report_package_cache", {}).get(
+        bundle_key
+    )
+    if cached_report_package:
+        report_downloads = st.columns(4)
+        report_downloads[0].download_button(
+            "Скачать HTML-отчёт",
+            cached_report_package["report.html"],
+            "soil_stamp_report.html",
+            "text/html",
+        )
+        report_downloads[1].download_button(
+            "Скачать XLSX-отчёт",
+            cached_report_package["report.xlsx"],
+            "soil_stamp_report.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        report_downloads[2].download_button(
+            "Скачать пакет согласования ZIP",
+            cached_report_package["approval_report.zip"],
+            "soil_stamp_approval_report.zip",
+            "application/zip",
+        )
+        report_downloads[3].download_button(
+            "Скачать SHA-256 manifest",
+            cached_report_package["artifact_manifest.json"],
+            "artifact_manifest.json",
+            "application/json",
+        )
     cached_bundle = st.session_state.bundle_cache.get(bundle_key)
     if cached_bundle:
         st.download_button(
@@ -1726,3 +2467,5 @@ with tabs[6]:
 
 if "plot_output" in locals() and plot_output is not None:
     plt.close(plot_output.figure)
+if "failure_plot_output" in locals() and failure_plot_output is not None:
+    plt.close(failure_plot_output.figure)

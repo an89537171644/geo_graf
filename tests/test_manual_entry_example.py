@@ -18,6 +18,12 @@ def test_manual_entry_example_roundtrip_and_pipeline() -> None:
     original = ManualDraft.from_json(EXAMPLE.read_bytes())
     restored = ManualDraft.from_json(original.to_json())
 
+    assert original.schema_version == "manual-entry-draft/1.2"
+    assert original.passport.baseline_group == "baseline"
+    assert original.passport.pair_id is None
+    assert original.passport.metrology_status == "confirmed"
+    assert original.passport.settlement_aggregation == "primary_channel"
+    assert original.passport.legacy_common_indicator_passport is None
     assert restored.to_dict() == original.to_dict()
     assert restored.sha256 == original.sha256
 

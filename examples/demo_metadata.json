@@ -22,6 +22,19 @@
   "load_resolution_kN": 0.001,
   "indicator_sign": 1.0,
   "reference_sign": -1.0,
+  "publication_curve_selection": {
+    "contract_version": "publication-curve-selection/1.0",
+    "decisions": [
+      {
+        "group": "baseline",
+        "method": "mean_curve"
+      },
+      {
+        "group": "reinforced",
+        "method": "mean_curve"
+      }
+    ]
+  },
   "project_passport": {
     "project_id": "DEMO-SSA-2026",
     "series_name": "Демонстрационная серия штамповых испытаний",

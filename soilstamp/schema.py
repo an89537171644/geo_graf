@@ -195,6 +195,18 @@ class IndicatorPassport:
     initial_turn: int = 0
     cumulative_sign: float = 1.0
     instrument_id: str | None = None
+    x_mm: float | None = None
+    y_mm: float | None = None
+    assignment_status: str = "review_required"
+    verification_status: str = "review_required"
+    verification_evaluation_date: str | None = None
+    verification_evaluation_date_source: str | None = None
+    verification_evaluation_rule: str = (
+        "verification_date <= experiment_date <= verification_valid_until"
+    )
+    reverse_tolerance_source: str = "passport"
+    cumulative_sign_source: str = "passport"
+    initial_turn_source: str = "passport"
     source_path: str = "metadata.indicator_passports"
     compatibility_mode: bool = False
 
@@ -209,6 +221,7 @@ class IndicatorProcessingResult:
     audit_rows: list[dict[str, Any]] = field(default_factory=list)
     event_rows: list[dict[str, Any]] = field(default_factory=list)
     passport_rows: list[dict[str, Any]] = field(default_factory=list)
+    aggregation_rows: list[dict[str, Any]] = field(default_factory=list)
     settlement_by_row: dict[int, float | None] = field(default_factory=dict)
     channel_settlement_by_row: dict[str, dict[int, float | None]] = field(
         default_factory=dict
@@ -272,6 +285,7 @@ class ProvenanceRecord:
     source_tree_sha256: str | None
     python_version: str
     dependency_versions: dict[str, str]
+    metrology_evaluations: list[dict[str, Any]] = field(default_factory=list)
     processing_timestamp_utc: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -296,6 +310,19 @@ class FailureResult:
     s_last_stable: float | None
     s_failure: float | None
     display: str
+    failure_observed: bool = False
+    interval_censored: bool = False
+    censoring_type: str = "indeterminate"
+    classification_status: str = "review_required"
+    classification_warning: str | None = None
+    capacity_kind: str = "unknown"
+    lower_bound: float | None = None
+    upper_bound: float | None = None
+    capacity_unit: str | None = None
+    lower_inclusive: bool = False
+    upper_inclusive: bool | None = None
+    failure_sequence_no: int | float | str | None = None
+    last_stable_sequence_no: int | float | str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -321,6 +348,8 @@ class PCRResult:
     bootstrap_valid: int
     pcr_manual: float | None = None
     manual_reason: str | None = None
+    manual_author: str | None = None
+    manual_confirmed_at_utc: str | None = None
     alternative: dict[str, Any] | None = None
 
     @property
@@ -346,6 +375,19 @@ class ModulusResult:
     nu: float
     shape_factor: float
     slope_m_per_kPa: float | None
+    profile_id: str = "diagnostic_unapproved_v1"
+    profile_version: str = "1.0"
+    is_primary: bool = False
+    review_status: str = "review_required"
+    p_range_source: str = "diagnostic_full_curve"
+    nu_source: str = "legacy_default"
+    shape_factor_source: str = "legacy_default"
+    used_indices: list[int] = field(default_factory=list)
+    methodology_note: str = ""
+    profile_source: str = "legacy_default"
+    p_range_origin: str = "observed_data"
+    requested_p_min_kPa: float | None = None
+    requested_p_max_kPa: float | None = None
     note: str = ""
 
     def to_dict(self) -> dict[str, Any]:

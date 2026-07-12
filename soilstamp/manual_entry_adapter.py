@@ -29,7 +29,7 @@ from .schema import Experiment, ValidationIssue
 from .sources import experiments_from_frame
 
 
-MANUAL_INPUT_SCHEMA = "manual-input/1.0"
+MANUAL_INPUT_SCHEMA = "manual-input/1.1"
 
 _LOAD_KIND = {
     "force": "force",
@@ -134,35 +134,46 @@ def _reinforcement_metadata(draft: ManualDraft) -> dict[str, Any]:
 
 
 def _indicator_passports(draft: ManualDraft) -> dict[str, dict[str, Any]]:
+    """Serialize only passports explicitly assigned to concrete channels.
+
+    A legacy common passport is intentionally ignored here.  It remains in
+    the draft for lossless migration and can become effective only after the
+    engineer uses the audited copy command and confirms the channel
+    assignment.
+    """
+
     passport = draft.passport
     count = passport.number_of_indicators
     if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 4:
         return {}
-    serials = [str(value).strip() for value in passport.indicator_serial_numbers]
-    mode = canonical_indicator_mode(passport.dial_mode) or passport.dial_mode
-    common = {
-        "type": passport.indicator_type,
-        "range_mm": _number(passport.dial_range_mm),
-        "division_mm": _number(passport.dial_resolution_mm),
-        "correction_factor": _number(passport.dial_correction_factor),
-        "verification_date": passport.verification_date,
-        "verification_valid_until": passport.verification_valid_until,
-        "mode": mode,
-        "initial_reading": _number(passport.dial_initial_reading),
-        "zero_correction_mm": _number(passport.dial_zero_correction_mm),
-        "max_increment_mm": _number(passport.dial_max_increment_mm),
-        "reverse_tolerance_mm": _number(passport.dial_reverse_tolerance_mm),
-        "travel_range_mm": _number(passport.dial_travel_range_mm),
-        "initial_turn": 0,
-        "cumulative_sign": 1.0,
-    }
     result: dict[str, dict[str, Any]] = {}
-    for index in range(count):
-        serial = serials[index] if index < len(serials) else ""
-        result[f"indicator_{index + 1}"] = {
-            **common,
-            "serial_number": serial,
-            "instrument_id": serial,
+    active_channels = [f"indicator_{index}" for index in range(1, count + 1)]
+    if passport.indicator_passports.get("reference_indicator") is not None:
+        active_channels.append("reference_indicator")
+    for channel in active_channels:
+        values = passport.indicator_passports.get(channel)
+        if values is None:
+            continue
+        result[channel] = {
+            "type": values.type,
+            "serial_number": values.serial_number,
+            "instrument_id": values.instrument_id or None,
+            "range_mm": _number(values.range_mm),
+            "division_mm": _number(values.division_mm),
+            "correction_factor": _number(values.correction_factor),
+            "mode": canonical_indicator_mode(values.mode) or values.mode,
+            "initial_reading": _number(values.initial_reading),
+            "initial_turn": values.initial_turn,
+            "zero_correction_mm": _number(values.zero_correction_mm),
+            "max_increment_mm": _number(values.max_increment_mm),
+            "reverse_tolerance_mm": _number(values.reverse_tolerance_mm),
+            "travel_range_mm": _number(values.travel_range_mm),
+            "verification_date": values.verification_date,
+            "verification_valid_until": values.verification_valid_until,
+            "x_mm": _number(values.x_mm),
+            "y_mm": _number(values.y_mm),
+            "cumulative_sign": _number(values.cumulative_sign),
+            "assignment_status": values.assignment_status,
         }
     return result
 
@@ -182,6 +193,9 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
             "correction_factor": values.get("correction_factor"),
             "verification_date": values.get("verification_date"),
             "verification_valid_until": values.get("verification_valid_until"),
+            "x_mm": values.get("x_mm"),
+            "y_mm": values.get("y_mm"),
+            "assignment_status": values.get("assignment_status"),
             # General project-passport compatibility aliases; metrological
             # semantics and original verification fields remain explicit.
             "calibration_date": values.get("verification_date"),
@@ -199,11 +213,21 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
     )
     test_metadata = {
         "group": passport.group_name or None,
-        "pair_id": passport.baseline_group or None,
+        "baseline_group": passport.baseline_group or None,
+        "pair_id": passport.pair_id or None,
         "soil_batch": passport.soil_batch or None,
         "experiment_date": passport.test_date or None,
         "operator": passport.operator or None,
         "reinforcement": reinforcement,
+        "settlement_aggregation": passport.settlement_aggregation,
+        "settlement_aggregation_channels": list(
+            passport.settlement_aggregation_channels
+        ),
+        "settlement_primary_channel": passport.settlement_primary_channel,
+        "settlement_missing_channel_policy": (
+            passport.settlement_missing_channel_policy
+        ),
+        "metrology_status": passport.metrology_status,
     }
     return {
         "project": passport.project_name,
@@ -215,7 +239,8 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
         "test_scope": passport.test_scope,
         "protocol_type": passport.protocol_type,
         "group": passport.group_name or None,
-        "pair_id": passport.baseline_group or None,
+        "baseline_group": passport.baseline_group or None,
+        "pair_id": passport.pair_id or None,
         "load_kind": load_kind,
         "load_unit": load_unit,
         "load_factor": _number(passport.load_factor),
@@ -225,10 +250,16 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
         "stamp_shape": stamp_shape,
         "stamp_diameter_mm": _number(passport.stamp_diameter_mm),
         "stamp_area_m2": _number(passport.stamp_area_m2),
-        "indicator_mode": canonical_indicator_mode(passport.dial_mode)
-        or passport.dial_mode,
-        "indicator_resolution_mm": _number(passport.dial_resolution_mm),
         "indicator_passports": indicator_passports,
+        "settlement_aggregation": passport.settlement_aggregation,
+        "settlement_aggregation_channels": list(
+            passport.settlement_aggregation_channels
+        ),
+        "settlement_primary_channel": passport.settlement_primary_channel,
+        "settlement_missing_channel_policy": (
+            passport.settlement_missing_channel_policy
+        ),
+        "metrology_status": passport.metrology_status,
         "instruments": instruments,
         "reinforcement": reinforcement,
         "soil": {"type": passport.soil_type or None, "batch": passport.soil_batch or None},
@@ -236,7 +267,8 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
             "project_id": passport.project_name or None,
             "series_name": passport.series_name or None,
             "reinforcement_status": passport.reinforcement_type or None,
-            "pair_id": passport.baseline_group or None,
+            "baseline_group": passport.baseline_group or None,
+            "pair_id": passport.pair_id or None,
             "soil_batch": passport.soil_batch or None,
             "experiment_date": passport.test_date or None,
             "operator": passport.operator or None,
@@ -244,6 +276,7 @@ def _manual_metadata(draft: ManualDraft) -> dict[str, Any]:
             "laboratory_or_site": passport.laboratory_or_site or None,
             "archive_number": passport.archive_number or None,
             "test_name": passport.test_name or None,
+            "metrology_status": passport.metrology_status,
             "instruments": instruments,
         },
         "tests": {test_id: test_metadata} if test_id else {},
@@ -291,7 +324,7 @@ def _canonical_row(
         "row_status": point.row_status,
         "comment": point.comment,
         "group": draft.passport.group_name or None,
-        "pair_id": draft.passport.baseline_group or None,
+        "pair_id": draft.passport.pair_id or None,
         "sequence_no": point.sequence_no,
         "source_sequence_no": point.sequence_no,
         "sequence_index": position,

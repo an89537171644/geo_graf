@@ -6,8 +6,10 @@ analysis runs deterministic for a fixed random seed and suitable for tests.
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import numpy as np
@@ -16,6 +18,13 @@ from scipy import stats
 from scipy.optimize import minimize_scalar
 
 from .data import AuditTrail, _stable_status_mask
+from .indicators import fit_indicator_plane
+from .methodology import (
+    ModulusOverrides,
+    ModulusResolution,
+    legacy_modulus_resolution,
+    resolve_modulus_method,
+)
 from .schema import ModulusResult, PCRResult
 
 
@@ -281,7 +290,16 @@ def confirm_manual_pcr(
         raise ValueError(
             f"Ручное pcr должно находиться в испытанном диапазоне {max(0.0, lower):g}–{upper:g} кПа."
         )
-    updated = replace(result, pcr_manual=value, manual_reason=reason)
+    if not str(reason).strip():
+        raise ValueError("Для ручного подтверждения pcr требуется непустое обоснование.")
+    confirmed_at = datetime.now(timezone.utc).isoformat()
+    updated = replace(
+        result,
+        pcr_manual=value,
+        manual_reason=str(reason).strip(),
+        manual_author=str(user).strip() or "local-user",
+        manual_confirmed_at_utc=confirmed_at,
+    )
     audit.record(
         "confirm_manual_pcr",
         scope=scope,
@@ -310,34 +328,99 @@ def estimate_moduli(
     *,
     p_min_kpa: float | None = None,
     p_max_kpa: float | None = None,
-    nu: float = 0.30,
-    shape_factor: float = 1.0,
+    nu: float | None = None,
+    shape_factor: float | None = None,
+    resolution: ModulusResolution | None = None,
     tangent_window: int = 3,
     bootstrap: int = 500,
     seed: int = 202604,
 ) -> pd.DataFrame:
-    """Calculate regression, secant, tangent and incremental apparent moduli."""
+    """Calculate apparent moduli under a resolved methodology contract.
 
+    Calls without ``resolution`` remain numerically compatible, but their
+    rows are explicitly marked ``diagnostic_unapproved_v1`` and can never be
+    primary results.
+    """
+
+    points = _finite_loading_points(frame)
+    p, s, source_indices = _deduplicate_pressure(points, "p_kPa", "settlement_mm")
+    if len(p) < 2:
+        raise ValueError("Недостаточно точек для расчета модуля.")
+    available_range = (float(np.min(p)), float(np.max(p)))
+    if resolution is None:
+        resolution = legacy_modulus_resolution(
+            p_min_kpa=p_min_kpa,
+            p_max_kpa=p_max_kpa,
+            nu=nu,
+            shape_factor=shape_factor,
+            available_p_range=available_range,
+        )
+    elif any(value is not None for value in (p_min_kpa, p_max_kpa, nu, shape_factor)):
+        raise ValueError(
+            "Нельзя смешивать resolution с legacy-параметрами p_min/p_max/nu/shape_factor."
+        )
+    nu = resolution.nu
+    shape_factor = resolution.shape_factor
     if not 0 <= nu < 0.5:
         raise ValueError("Коэффициент Пуассона должен быть в диапазоне [0; 0,5).")
     if shape_factor <= 0:
         raise ValueError("Коэффициент формы должен быть положительным.")
-    points = _finite_loading_points(frame)
-    p, s, _ = _deduplicate_pressure(points, "p_kPa", "settlement_mm")
-    if len(p) < 2:
-        raise ValueError("Недостаточно точек для расчета модуля.")
-    lower = float(np.min(p) if p_min_kpa is None else p_min_kpa)
-    upper = float(np.max(p) if p_max_kpa is None else p_max_kpa)
+    lower = float(
+        available_range[0] if resolution.p_min_kpa is None else resolution.p_min_kpa
+    )
+    upper = float(
+        available_range[1] if resolution.p_max_kpa is None else resolution.p_max_kpa
+    )
     selected = (p >= lower) & (p <= upper)
     p_sel, s_sel = p[selected], s[selected]
+    selected_indices = np.asarray(source_indices, dtype=int)[selected].astype(int).tolist()
     if len(p_sel) < 2:
         raise ValueError("В выбранном диапазоне нужно не менее двух точек.")
     d_values = pd.to_numeric(points.get("D_mm", pd.Series(dtype=float)), errors="coerce").dropna()
     if d_values.empty:
         raise ValueError("Для E_stamp_app требуется диаметр D.")
     diameter = float(d_values.iloc[0])
+    if not np.isfinite(diameter) or diameter <= 0:
+        raise ValueError("Для E_stamp_app диаметр D должен быть конечным и положительным.")
     if not np.allclose(d_values.to_numpy(), diameter, rtol=1e-6, atol=1e-6):
         raise ValueError("E_stamp_app нельзя объединять для разных диаметров штампа.")
+
+    def method_contract(
+        indices: list[int],
+        *,
+        primary_method: bool = False,
+        calculation_valid: bool = True,
+        calculation_note: str = "",
+    ) -> dict[str, Any]:
+        row_is_primary = bool(primary_method and resolution.is_primary and calculation_valid)
+        row_review_status = resolution.review_status
+        methodology_note = resolution.methodology_note
+        if primary_method and not calculation_valid:
+            row_review_status = "review_required"
+            methodology_note = f"{methodology_note} {calculation_note}".strip()
+        return {
+            "profile_id": resolution.profile_id,
+            "profile_version": resolution.profile_version,
+            "is_primary": row_is_primary,
+            "review_status": row_review_status,
+            "p_range_source": resolution.p_range_source,
+            "nu_source": resolution.nu_source,
+            "shape_factor_source": resolution.shape_factor_source,
+            "used_indices": [int(index) for index in indices],
+            "methodology_note": methodology_note,
+            "profile_source": resolution.profile_source,
+            "p_range_origin": resolution.p_range_origin,
+            "requested_p_min_kPa": (
+                resolution.p_min_kpa
+                if resolution.p_range_source != "diagnostic_full_curve"
+                else None
+            ),
+            "requested_p_max_kPa": (
+                resolution.p_max_kpa
+                if resolution.p_range_source != "diagnostic_full_curve"
+                else None
+            ),
+        }
 
     rows: list[ModulusResult] = []
     x = np.column_stack([np.ones(len(p_sel)), p_sel])
@@ -349,6 +432,19 @@ def estimate_moduli(
     r2 = 1.0 - rss / total if total > EPS else float("nan")
     slope = float(coef[1])
     e_reg = _modulus_from_slope(slope, diameter, nu, shape_factor)
+    settlement_scale = max(float(np.max(np.abs(s_sel))), 1.0)
+    settlement_has_variation = bool(
+        float(np.ptp(s_sel)) > np.finfo(float).eps * settlement_scale
+    )
+    regression_valid = bool(
+        settlement_has_variation and np.isfinite(slope) and slope > 0 and np.isfinite(e_reg) and e_reg > 0
+    )
+    regression_calculation_note = (
+        "Регрессионный E понижен до diagnostic: наклон/деформация не дают "
+        "конечного положительного модуля."
+        if not regression_valid
+        else ""
+    )
     rng = np.random.default_rng(seed)
     bootstrap_e: list[float] = []
     centered = residuals - np.mean(residuals)
@@ -375,7 +471,17 @@ def estimate_moduli(
             nu=nu,
             shape_factor=shape_factor,
             slope_m_per_kPa=slope / 1000.0,
-            note="Основной показатель; ДИ — residual bootstrap.",
+            note=(
+                "Основной условный показатель; ДИ — residual bootstrap."
+                if resolution.is_primary and regression_valid
+                else "Диагностический показатель; ДИ — residual bootstrap."
+            ),
+            **method_contract(
+                selected_indices,
+                primary_method=True,
+                calculation_valid=regression_valid,
+                calculation_note=regression_calculation_note,
+            ),
         )
     )
     delta_p = float(p_sel[-1] - p_sel[0])
@@ -395,6 +501,7 @@ def estimate_moduli(
             shape_factor=shape_factor,
             slope_m_per_kPa=secant_slope / 1000.0,
             note="Секущая по границам выбранного диапазона; R² неприменим.",
+            **method_contract([selected_indices[0], selected_indices[-1]]),
         )
     )
 
@@ -434,6 +541,7 @@ def estimate_moduli(
                 shape_factor=shape_factor,
                 slope_m_per_kPa=local_slope / 1000.0,
                 note="Локальная линейная регрессия.",
+                **method_contract(selected_indices[start:stop]),
             )
         )
     for i in range(1, len(p_sel)):
@@ -454,9 +562,59 @@ def estimate_moduli(
                 shape_factor=shape_factor,
                 slope_m_per_kPa=inc_slope / 1000.0,
                 note="Только диагностический соседний инкремент; не основной результат.",
+                **method_contract(selected_indices[i - 1 : i + 1]),
             )
         )
-    return pd.DataFrame([row.to_dict() for row in rows])
+    table = pd.DataFrame([row.to_dict() for row in rows])
+    resolved_contract = resolution.to_dict()
+    if resolution.is_primary and not regression_valid:
+        resolved_contract["is_primary"] = False
+        resolved_contract["review_status"] = "review_required"
+        resolved_contract["methodology_note"] = (
+            f"{resolution.methodology_note} {regression_calculation_note}".strip()
+        )
+    table.attrs["modulus_resolution"] = resolved_contract
+    return table
+
+
+def calculate_moduli_for_test(
+    frame: pd.DataFrame,
+    metadata: dict[str, Any] | None,
+    test_id: str,
+    *,
+    overrides: ModulusOverrides | dict[str, Any] | None = None,
+    manual_confirmation: ModulusOverrides | dict[str, Any] | None = None,
+    pcr_result: PCRResult | None = None,
+    tangent_window: int = 3,
+    bootstrap: int = 500,
+    seed: int = 202604,
+) -> pd.DataFrame:
+    """Resolve and calculate one test through the API shared by CLI and GUI."""
+
+    scoped = frame
+    if "test_id" in frame:
+        scoped = frame[frame["test_id"].astype(str) == str(test_id)]
+        if scoped.empty:
+            raise ValueError(f"Испытание {test_id} не найдено для расчёта модуля.")
+    points = _finite_loading_points(scoped)
+    p, _, _ = _deduplicate_pressure(points, "p_kPa", "settlement_mm")
+    if len(p) < 2:
+        raise ValueError("Недостаточно точек для расчета модуля.")
+    resolution = resolve_modulus_method(
+        metadata,
+        str(test_id),
+        overrides=overrides,
+        manual_confirmation=manual_confirmation,
+        pcr_result=pcr_result,
+        available_p_range=(float(np.min(p)), float(np.max(p))),
+    )
+    return estimate_moduli(
+        scoped,
+        resolution=resolution,
+        tangent_window=tangent_window,
+        bootstrap=bootstrap,
+        seed=seed,
+    )
 
 
 def modulus_sensitivity(
@@ -487,12 +645,18 @@ def _test_curves(
     pressure: str = "p_kPa",
     settlement: str = "settlement_mm",
 ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    curve_parts = sorted(
+        ((str(test_id), part) for test_id, part in frame.groupby("test_id", sort=False)),
+        key=lambda item: item[0],
+    )
+    if len({test_id for test_id, _ in curve_parts}) != len(curve_parts):
+        raise ValueError("test_id должны быть уникальны после строкового преобразования.")
     curves: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    for test_id, part in frame.groupby("test_id", sort=False):
+    for test_id, part in curve_parts:
         points = _finite_loading_points(part, pressure=pressure, settlement=settlement)
         p, s, _ = _deduplicate_pressure(points, pressure, settlement)
         if len(p) >= 1:
-            curves[str(test_id)] = (p, s)
+            curves[test_id] = (p, s)
     return curves
 
 
@@ -506,18 +670,21 @@ def _common_union_grid(curves: dict[str, tuple[np.ndarray, np.ndarray]]) -> np.n
 def _curve_matrix(
     curves: dict[str, tuple[np.ndarray, np.ndarray]], grid: np.ndarray, tolerance: float
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    ids = list(curves)
+    ids = sorted(curves)
     values = np.full((len(ids), len(grid)), np.nan)
     measured = np.zeros((len(ids), len(grid)), dtype=bool)
     for row, test_id in enumerate(ids):
         p, s = curves[test_id]
-        inside = (grid >= p.min() - tolerance) & (grid <= p.max() + tolerance)
-        values[row, inside] = np.interp(grid[inside], p, s)
         for column, level in enumerate(grid):
             hits = np.flatnonzero(np.isclose(p, level, rtol=0.0, atol=tolerance))
             if len(hits):
                 values[row, column] = float(np.mean(s[hits]))
                 measured[row, column] = True
+            elif float(p.min()) <= float(level) <= float(p.max()):
+                # Interpolation is permitted only inside the individual curve
+                # support.  ``np.interp`` outside this interval would silently
+                # manufacture a constant extrapolated tail.
+                values[row, column] = float(np.interp(level, p, s))
     return ids, values, measured
 
 
@@ -531,6 +698,360 @@ def _column_nanmean(values: np.ndarray) -> np.ndarray:
     )
 
 
+def _column_nanmedian(values: np.ndarray) -> np.ndarray:
+    counts = np.sum(np.isfinite(values), axis=0)
+    result = np.full(values.shape[1], np.nan, dtype=float)
+    for column in np.flatnonzero(counts > 0):
+        result[column] = float(np.nanmedian(values[:, column]))
+    return result
+
+
+def _column_statistic(values: np.ndarray, statistic: str) -> np.ndarray:
+    if statistic == "mean":
+        return _column_nanmean(values)
+    if statistic == "median":
+        return _column_nanmedian(values)
+    raise ValueError("statistic должен быть 'mean' или 'median'.")
+
+
+def _constant_positive_test_value(part: pd.DataFrame, column: str, test_id: str) -> float:
+    if column not in part:
+        raise ValueError(f"{test_id}: отсутствует обязательный столбец {column}.")
+    values = pd.to_numeric(part[column], errors="coerce").to_numpy(dtype=float)
+    if len(values) == 0 or not np.isfinite(values).all() or np.any(values <= 0):
+        raise ValueError(f"{test_id}: {column} должен быть конечным и положительным для всех строк.")
+    reference = float(values[0])
+    if not np.allclose(values, reference, rtol=1e-9, atol=1e-12):
+        raise ValueError(f"{test_id}: {column} изменяется внутри одного испытания.")
+    return reference
+
+
+def _coordinate_curves(
+    frame: pd.DataFrame,
+    *,
+    axis_mode: str,
+) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], str, str]:
+    if "test_id" not in frame:
+        raise ValueError("Для агрегирования требуется столбец test_id.")
+    if axis_mode not in {"F-s", "p-s", "p-s/D"}:
+        raise ValueError("axis_mode должен быть 'F-s', 'p-s' или 'p-s/D'.")
+
+    curve_parts = sorted(
+        ((str(test_id), part) for test_id, part in frame.groupby("test_id", sort=False)),
+        key=lambda item: item[0],
+    )
+    if not curve_parts:
+        raise ValueError("Нет испытаний для агрегирования.")
+    if len({test_id for test_id, _ in curve_parts}) != len(curve_parts):
+        raise ValueError("test_id должны быть уникальны после строкового преобразования.")
+
+    if axis_mode == "F-s":
+        geometry = [
+            (
+                test_id,
+                _constant_positive_test_value(part, "D_mm", test_id),
+                _constant_positive_test_value(part, "stamp_area_m2", test_id),
+            )
+            for test_id, part in curve_parts
+        ]
+        diameter = geometry[0][1]
+        area = geometry[0][2]
+        if any(
+            not np.isclose(item[1], diameter, rtol=1e-9, atol=1e-12)
+            or not np.isclose(item[2], area, rtol=1e-9, atol=1e-12)
+            for item in geometry[1:]
+        ):
+            raise ValueError(
+                "Средняя F-s допустима только для одинаковых диаметра и площади штампа."
+            )
+        x_column = "F_kN"
+        y_quantity = "settlement_mm"
+    else:
+        x_column = "p_kPa"
+        y_quantity = "settlement_over_d" if axis_mode == "p-s/D" else "settlement_mm"
+
+    curves: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for test_id, part in curve_parts:
+        work = part
+        settlement_column = "settlement_mm"
+        if axis_mode == "p-s/D":
+            diameter = _constant_positive_test_value(part, "D_mm", test_id)
+            work = part.copy()
+            settlement_column = "_settlement_over_d"
+            work[settlement_column] = pd.to_numeric(
+                work["settlement_mm"], errors="coerce"
+            ) / diameter
+        points = _finite_loading_points(
+            work,
+            pressure=x_column,
+            settlement=settlement_column,
+        )
+        x_values, y_values, _ = _deduplicate_pressure(
+            points,
+            x_column,
+            settlement_column,
+        )
+        if len(x_values) == 0:
+            raise ValueError(f"{test_id}: нет конечных устойчивых точек для {axis_mode}.")
+        curves[test_id] = (x_values, y_values)
+    return curves, x_column, y_quantity
+
+
+def _coordinate_grid(
+    curves: dict[str, tuple[np.ndarray, np.ndarray]],
+    *,
+    common_support: bool,
+    tolerance: float,
+) -> tuple[np.ndarray, float, float]:
+    levels = _common_union_grid(curves)
+    if len(levels) == 0:
+        raise ValueError("У повторностей нет уровней нагрузки.")
+    minima = [float(x.min()) for x, _ in curves.values()]
+    maxima = [float(x.max()) for x, _ in curves.values()]
+    if common_support:
+        support_lower = max(minima)
+        support_upper = min(maxima)
+        if support_lower > support_upper + tolerance:
+            raise ValueError("У повторностей нет общей области нагрузки.")
+        levels = levels[
+            (levels >= support_lower - tolerance) & (levels <= support_upper + tolerance)
+        ]
+    else:
+        support_lower = min(minima)
+        support_upper = max(maxima)
+    if len(levels) == 0:
+        raise ValueError("У повторностей нет уровней внутри разрешённой области.")
+    return levels, support_lower, support_upper
+
+
+def _aggregate_matrix(
+    matrix: np.ndarray,
+    *,
+    statistic: str,
+    confidence: float,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, np.ndarray]:
+    n = np.sum(np.isfinite(matrix), axis=0)
+    aggregate = _column_statistic(matrix, statistic)
+    alpha = 1.0 - confidence
+
+    if statistic == "mean":
+        sd = np.array(
+            [
+                np.nanstd(matrix[:, column], ddof=1) if n[column] >= 2 else np.nan
+                for column in range(matrix.shape[1])
+            ]
+        )
+        se = sd / np.sqrt(n)
+        critical = np.array(
+            [
+                stats.t.ppf(1.0 - alpha / 2.0, int(count - 1))
+                if count >= 2
+                else np.nan
+                for count in n
+            ]
+        )
+        t_low = aggregate - critical * se
+        t_high = aggregate + critical * se
+    else:
+        se = np.full(matrix.shape[1], np.nan, dtype=float)
+        t_low = np.full(matrix.shape[1], np.nan, dtype=float)
+        t_high = np.full(matrix.shape[1], np.nan, dtype=float)
+
+    rng = np.random.default_rng(seed)
+    boot_statistics: list[np.ndarray] = []
+    if matrix.shape[0] >= 2:
+        for _ in range(max(0, int(bootstrap))):
+            selected = rng.integers(0, matrix.shape[0], size=matrix.shape[0])
+            boot_statistics.append(_column_statistic(matrix[selected], statistic))
+    if boot_statistics:
+        boot = np.vstack(boot_statistics)
+        point_low = np.nanquantile(boot, alpha / 2.0, axis=0)
+        point_high = np.nanquantile(boot, 1.0 - alpha / 2.0, axis=0)
+        if statistic == "median":
+            band_scale = np.nanstd(boot, axis=0, ddof=1)
+        else:
+            band_scale = se
+        standardization_scale = np.where(
+            np.isfinite(band_scale) & (band_scale > EPS), band_scale, np.nan
+        )
+        valid_scale = np.isfinite(standardization_scale)
+        if valid_scale.any():
+            standardized = np.abs(
+                (boot[:, valid_scale] - aggregate[valid_scale])
+                / standardization_scale[valid_scale]
+            )
+            valid_rows = np.isfinite(standardized).any(axis=1)
+            maxima = (
+                np.nanmax(standardized[valid_rows], axis=1)
+                if valid_rows.any()
+                else np.array([])
+            )
+            maxima = maxima[np.isfinite(maxima)]
+            q = float(np.quantile(maxima, confidence)) if len(maxima) else np.nan
+            simultaneous_low = aggregate - q * band_scale
+            simultaneous_high = aggregate + q * band_scale
+        else:
+            # Identical curves: the empirical band collapses to the aggregate.
+            simultaneous_low = aggregate.copy()
+            simultaneous_high = aggregate.copy()
+    else:
+        point_low = point_high = simultaneous_low = simultaneous_high = np.full(
+            matrix.shape[1], np.nan
+        )
+
+    insufficient = n < 2
+    for values in (
+        t_low,
+        t_high,
+        point_low,
+        point_high,
+        simultaneous_low,
+        simultaneous_high,
+    ):
+        values[insufficient] = np.nan
+    return {
+        "n": n,
+        "aggregate": aggregate,
+        "t_low": t_low,
+        "t_high": t_high,
+        "bootstrap_low": point_low,
+        "bootstrap_high": point_high,
+        "simultaneous_low": simultaneous_low,
+        "simultaneous_high": simultaneous_high,
+    }
+
+
+def aggregate_group_curve(
+    frame: pd.DataFrame,
+    *,
+    axis_mode: str = "p-s",
+    statistic: str = "mean",
+    confidence: float = 0.95,
+    bootstrap: int = 1000,
+    seed: int = 202604,
+    coordinate_tolerance: float = 1e-8,
+) -> pd.DataFrame:
+    """Aggregate one repeat series in explicitly selected coordinates.
+
+    ``F-s`` and ``p-s`` use only the intersection of individual supports.
+    ``p-s/D`` first normalizes every test by its own diameter and then uses the
+    union of measured pressure levels; each test contributes only inside its
+    own support.  No coordinate mode extrapolates a curve.
+    """
+
+    if not 0.0 < float(confidence) < 1.0:
+        raise ValueError("confidence должен находиться между 0 и 1.")
+    if not np.isfinite(coordinate_tolerance) or coordinate_tolerance < 0:
+        raise ValueError("coordinate_tolerance должен быть конечным и неотрицательным.")
+    if statistic not in {"mean", "median"}:
+        raise ValueError("statistic должен быть 'mean' или 'median'.")
+
+    groups = (
+        sorted(frame["group"].dropna().astype(str).unique().tolist())
+        if "group" in frame
+        else []
+    )
+    if len(groups) > 1:
+        raise ValueError("aggregate_group_curve принимает ровно одну группу испытаний.")
+    group_name = groups[0] if groups else ""
+
+    curves, x_column, y_quantity = _coordinate_curves(frame, axis_mode=axis_mode)
+    grid, support_lower, support_upper = _coordinate_grid(
+        curves,
+        common_support=axis_mode in {"F-s", "p-s"},
+        tolerance=coordinate_tolerance,
+    )
+    ids, matrix, measured = _curve_matrix(curves, grid, coordinate_tolerance)
+    summary = _aggregate_matrix(
+        matrix,
+        statistic=statistic,
+        confidence=confidence,
+        bootstrap=bootstrap,
+        seed=seed,
+    )
+    n = summary["n"].astype(int)
+    measured_n = measured.sum(axis=0).astype(int)
+    interpolated_n = n - measured_n
+    aggregate = summary["aggregate"]
+    physical_settlement_mm = y_quantity == "settlement_mm"
+    mean_alias = (
+        aggregate
+        if statistic == "mean" and physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    median_alias = aggregate if statistic == "median" else np.full(len(grid), np.nan)
+    legacy_t_low = (
+        summary["t_low"] if physical_settlement_mm else np.full(len(grid), np.nan)
+    )
+    legacy_t_high = (
+        summary["t_high"] if physical_settlement_mm else np.full(len(grid), np.nan)
+    )
+    legacy_bootstrap_low = (
+        summary["bootstrap_low"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_bootstrap_high = (
+        summary["bootstrap_high"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_simultaneous_low = (
+        summary["simultaneous_low"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    legacy_simultaneous_high = (
+        summary["simultaneous_high"]
+        if physical_settlement_mm
+        else np.full(len(grid), np.nan)
+    )
+    f_values = grid if x_column == "F_kN" else np.full(len(grid), np.nan)
+    p_values = grid if x_column == "p_kPa" else np.full(len(grid), np.nan)
+    return pd.DataFrame(
+        {
+            "group": group_name,
+            "axis_mode": axis_mode,
+            "statistic": statistic,
+            "x": grid,
+            "y": aggregate,
+            "settlement": aggregate,
+            "aggregate_settlement": aggregate,
+            "mean_settlement_mm": mean_alias,
+            "median_settlement": median_alias,
+            "F_kN": f_values,
+            "p_kPa": p_values,
+            "x_column": x_column,
+            "y_quantity": y_quantity,
+            "t_ci_low": summary["t_low"],
+            "t_ci_high": summary["t_high"],
+            "bootstrap_ci_low": summary["bootstrap_low"],
+            "bootstrap_ci_high": summary["bootstrap_high"],
+            "simultaneous_low": summary["simultaneous_low"],
+            "simultaneous_high": summary["simultaneous_high"],
+            "t_ci_low_mm": legacy_t_low,
+            "t_ci_high_mm": legacy_t_high,
+            "bootstrap_ci_low_mm": legacy_bootstrap_low,
+            "bootstrap_ci_high_mm": legacy_bootstrap_high,
+            "simultaneous_low_mm": legacy_simultaneous_low,
+            "simultaneous_high_mm": legacy_simultaneous_high,
+            "n": n,
+            "measured_n": measured_n,
+            "interpolated_n": interpolated_n,
+            "draw_marker": interpolated_n == 0,
+            "all_measured": interpolated_n == 0,
+            "descriptive_small_n": n < 5,
+            "confidence": confidence,
+            "bootstrap_seed": seed,
+            "support_lower": support_lower,
+            "support_upper": support_upper,
+            "source_test_ids": ",".join(ids),
+        }
+    )
+
+
 def group_mean_curve(
     frame: pd.DataFrame,
     *,
@@ -539,79 +1060,37 @@ def group_mean_curve(
     seed: int = 202604,
     pressure_tolerance_kpa: float = 1e-8,
 ) -> pd.DataFrame:
-    """Mean curve on the union of real levels, with exact t and max-t bands."""
+    """Compatibility wrapper for a mean curve in ``p-s`` coordinates."""
 
-    curves = _test_curves(frame)
-    grid = _common_union_grid(curves)
-    if len(grid) == 0:
-        raise ValueError("У повторностей нет общей области давления.")
-    ids, matrix, measured = _curve_matrix(curves, grid, pressure_tolerance_kpa)
-    n = np.sum(np.isfinite(matrix), axis=0)
-    mean = _column_nanmean(matrix)
-    sd = np.array(
-        [np.nanstd(matrix[:, j], ddof=1) if n[j] >= 2 else np.nan for j in range(len(grid))]
+    result = aggregate_group_curve(
+        frame,
+        axis_mode="p-s",
+        statistic="mean",
+        confidence=confidence,
+        bootstrap=bootstrap,
+        seed=seed,
+        coordinate_tolerance=pressure_tolerance_kpa,
     )
-    se = sd / np.sqrt(n)
-    alpha = 1.0 - confidence
-    critical = np.array(
-        [stats.t.ppf(1.0 - alpha / 2.0, int(count - 1)) if count >= 2 else np.nan for count in n]
-    )
-    t_low = mean - critical * se
-    t_high = mean + critical * se
-
-    rng = np.random.default_rng(seed)
-    boot_means: list[np.ndarray] = []
-    if len(ids) >= 2:
-        for _ in range(max(0, int(bootstrap))):
-            selected = rng.integers(0, len(ids), size=len(ids))
-            boot_means.append(_column_nanmean(matrix[selected]))
-    if boot_means:
-        boot = np.vstack(boot_means)
-        point_low = np.nanquantile(boot, alpha / 2.0, axis=0)
-        point_high = np.nanquantile(boot, 1.0 - alpha / 2.0, axis=0)
-        scale = np.where(np.isfinite(se) & (se > EPS), se, np.nan)
-        valid_scale = np.isfinite(scale)
-        if valid_scale.any():
-            standardized = np.abs((boot[:, valid_scale] - mean[valid_scale]) / scale[valid_scale])
-            valid_rows = np.isfinite(standardized).any(axis=1)
-            maxima = np.nanmax(standardized[valid_rows], axis=1) if valid_rows.any() else np.array([])
-            maxima = maxima[np.isfinite(maxima)]
-            q = float(np.quantile(maxima, confidence)) if len(maxima) else np.nan
-            sim_low = mean - q * se
-            sim_high = mean + q * se
-        else:
-            # Identical curves: the empirical band collapses to the mean.
-            sim_low = mean.copy()
-            sim_high = mean.copy()
-    else:
-        point_low = point_high = sim_low = sim_high = np.full(len(grid), np.nan)
-    insufficient = n < 2
-    t_low[insufficient] = np.nan
-    t_high[insufficient] = np.nan
-    point_low[insufficient] = np.nan
-    point_high[insufficient] = np.nan
-    sim_low[insufficient] = np.nan
-    sim_high[insufficient] = np.nan
-    measured_n = measured.sum(axis=0)
-    return pd.DataFrame(
-        {
-            "p_kPa": grid,
-            "mean_settlement_mm": mean,
-            "t_ci_low_mm": t_low,
-            "t_ci_high_mm": t_high,
-            "bootstrap_ci_low_mm": point_low,
-            "bootstrap_ci_high_mm": point_high,
-            "simultaneous_low_mm": sim_low,
-            "simultaneous_high_mm": sim_high,
-            "n": n.astype(int),
-            "measured_n": measured_n.astype(int),
-            "interpolated_n": (n - measured_n).astype(int),
-            "all_measured": measured_n == n,
-            "descriptive_small_n": n < 5,
-            "confidence": confidence,
-            "bootstrap_seed": seed,
-        }
-    )
+    return result[
+        [
+            "p_kPa",
+            "mean_settlement_mm",
+            "t_ci_low_mm",
+            "t_ci_high_mm",
+            "bootstrap_ci_low_mm",
+            "bootstrap_ci_high_mm",
+            "simultaneous_low_mm",
+            "simultaneous_high_mm",
+            "n",
+            "measured_n",
+            "interpolated_n",
+            "all_measured",
+            "draw_marker",
+            "descriptive_small_n",
+            "confidence",
+            "bootstrap_seed",
+        ]
+    ].copy()
 
 
 def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
@@ -644,22 +1123,167 @@ def _bootstrap_interval(samples: list[np.ndarray], columns: int) -> tuple[np.nda
     return low, high
 
 
-def _pair_mapping(group_frame: pd.DataFrame) -> dict[str, str]:
+@dataclass(frozen=True, slots=True)
+class PairingResolution:
+    """Auditable decision between paired and independent group analysis."""
+
+    analysis_design: str
+    pairing_status: str
+    pairing_reason: str
+    pairing_warning: str
+    pair_ids: tuple[str, ...]
+    baseline_test_by_pair: dict[str, str]
+    reinforced_test_by_pair: dict[str, str]
+
+
+def _independent_pairing_resolution(issues: Iterable[str]) -> PairingResolution:
+    unique_issues = tuple(dict.fromkeys(str(issue) for issue in issues if str(issue)))
+    reason = ";".join(unique_issues or ("missing_pair_id:both_groups",))
+    warning = (
+        "Парный дизайн не подтверждён "
+        f"({reason}). Выполнен independent analysis по всем анализируемым кривым; "
+        "частичный отбор пар не применялся."
+    )
+    return PairingResolution(
+        analysis_design="independent",
+        pairing_status="independent_fallback",
+        pairing_reason=reason,
+        pairing_warning=warning,
+        pair_ids=(),
+        baseline_test_by_pair={},
+        reinforced_test_by_pair={},
+    )
+
+
+def _explicit_pair_id(value: Any) -> tuple[str | None, bool]:
+    """Return the stored ID and whether it contains unapproved edge whitespace."""
+
+    if pd.isna(value):
+        return None, False
+    explicit = str(value)
+    stripped = explicit.strip()
+    if not stripped:
+        return None, False
+    return explicit, explicit != stripped
+
+
+def _pair_assignments(
+    group_frame: pd.DataFrame,
+    test_ids: Iterable[str],
+    *,
+    group_role: str,
+) -> tuple[dict[str, str], list[str]]:
+    """Return pair->test assignments and deterministic validation issue codes."""
+
+    expected = tuple(dict.fromkeys(str(value) for value in test_ids))
+    assignments_by_test: dict[str, str] = {}
+    issues: list[str] = []
     if "pair_id" not in group_frame:
-        return {}
-    unique = group_frame[["test_id", "pair_id"]].dropna().drop_duplicates()
-    mapping: dict[str, str] = {}
-    duplicated: set[str] = set()
-    for _, row in unique.iterrows():
-        pair = str(row["pair_id"])
-        test_id = str(row["test_id"])
-        if pair in mapping and mapping[pair] != test_id:
-            duplicated.add(pair)
-        else:
-            mapping[pair] = test_id
-    for pair in duplicated:
-        mapping.pop(pair, None)
-    return mapping
+        return {}, [f"missing_pair_id:{group_role}:{test_id}" for test_id in expected]
+
+    test_values = group_frame["test_id"].astype(str)
+    for test_id in expected:
+        values: set[str] = set()
+        has_noncanonical_value = False
+        for value in group_frame.loc[test_values == test_id, "pair_id"].tolist():
+            explicit, noncanonical = _explicit_pair_id(value)
+            has_noncanonical_value = has_noncanonical_value or noncanonical
+            if explicit is not None and not noncanonical:
+                values.add(explicit)
+        if has_noncanonical_value:
+            issues.append(f"noncanonical_pair_id:{group_role}:{test_id}")
+            continue
+        if not values:
+            issues.append(f"missing_pair_id:{group_role}:{test_id}")
+            continue
+        if len(values) > 1:
+            issues.append(f"conflicting_pair_id_within_test:{group_role}:{test_id}")
+            continue
+        assignments_by_test[test_id] = next(iter(values))
+
+    tests_by_pair: dict[str, list[str]] = {}
+    for test_id, pair_id in assignments_by_test.items():
+        tests_by_pair.setdefault(pair_id, []).append(test_id)
+    for pair_id, assigned_tests in sorted(tests_by_pair.items()):
+        if len(assigned_tests) > 1:
+            issues.append(f"duplicate_pair_id_within_group:{group_role}:{pair_id}")
+
+    valid = {
+        pair_id: assigned_tests[0]
+        for pair_id, assigned_tests in tests_by_pair.items()
+        if len(assigned_tests) == 1
+    }
+    return valid, issues
+
+
+def resolve_pairing_design(
+    baseline: pd.DataFrame,
+    reinforced: pd.DataFrame,
+    *,
+    baseline_test_ids: Iterable[str] | None = None,
+    reinforced_test_ids: Iterable[str] | None = None,
+) -> PairingResolution:
+    """Use pairing only when every analyzable test forms one unambiguous pair.
+
+    ``baseline_group`` is intentionally not accepted by this resolver and can
+    never be used as evidence of pairing. Missing, blank, conflicting,
+    duplicated, or incomplete ``pair_id`` assignments cause a lossless
+    independent-analysis fallback.
+    """
+
+    if baseline_test_ids is None:
+        baseline_test_ids = baseline["test_id"].dropna().astype(str).unique().tolist()
+    if reinforced_test_ids is None:
+        reinforced_test_ids = reinforced["test_id"].dropna().astype(str).unique().tolist()
+    baseline_ids = tuple(dict.fromkeys(str(value) for value in baseline_test_ids))
+    reinforced_ids = tuple(dict.fromkeys(str(value) for value in reinforced_test_ids))
+
+    baseline_pairs, baseline_issues = _pair_assignments(
+        baseline,
+        baseline_ids,
+        group_role="baseline",
+    )
+    reinforced_pairs, reinforced_issues = _pair_assignments(
+        reinforced,
+        reinforced_ids,
+        group_role="reinforced",
+    )
+    overlapping_test_ids = sorted(set(baseline_ids) & set(reinforced_ids))
+    issues = [
+        *(f"overlapping_test_id:{test_id}" for test_id in overlapping_test_ids),
+        *baseline_issues,
+        *reinforced_issues,
+    ]
+    baseline_pair_ids = set(baseline_pairs)
+    reinforced_pair_ids = set(reinforced_pairs)
+    if baseline_pair_ids != reinforced_pair_ids:
+        missing_reinforced = sorted(baseline_pair_ids - reinforced_pair_ids)
+        missing_baseline = sorted(reinforced_pair_ids - baseline_pair_ids)
+        details = ",".join(
+            [
+                *(f"reinforced:{pair_id}" for pair_id in missing_reinforced),
+                *(f"baseline:{pair_id}" for pair_id in missing_baseline),
+            ]
+        )
+        issues.append(f"incomplete_pair_set:{details}")
+
+    complete = bool(baseline_pair_ids) and not issues and (
+        len(baseline_pairs) == len(baseline_ids)
+        and len(reinforced_pairs) == len(reinforced_ids)
+    )
+    if complete:
+        pair_ids = tuple(sorted(baseline_pair_ids))
+        return PairingResolution(
+            analysis_design="paired",
+            pairing_status="paired_validated",
+            pairing_reason="complete_pairing",
+            pairing_warning="",
+            pair_ids=pair_ids,
+            baseline_test_by_pair={pair_id: baseline_pairs[pair_id] for pair_id in pair_ids},
+            reinforced_test_by_pair={pair_id: reinforced_pairs[pair_id] for pair_id in pair_ids},
+        )
+
+    return _independent_pairing_resolution(issues)
 
 
 def compare_groups(
@@ -674,30 +1298,51 @@ def compare_groups(
 
     if "group" not in frame:
         raise ValueError("Для сравнения нужен столбец group.")
+    if str(baseline_group) == str(reinforced_group):
+        raise ValueError("Для сравнения нужно выбрать две разные группы.")
     baseline = frame[frame["group"].astype(str) == str(baseline_group)]
     reinforced = frame[frame["group"].astype(str) == str(reinforced_group)]
+    baseline_test_ids = baseline["test_id"].dropna().astype(str).unique().tolist()
+    reinforced_test_ids = reinforced["test_id"].dropna().astype(str).unique().tolist()
+    overlapping_test_ids = sorted(set(baseline_test_ids) & set(reinforced_test_ids))
+    if overlapping_test_ids:
+        rendered = ", ".join(overlapping_test_ids)
+        raise ValueError(
+            "Один test_id не может одновременно входить в обе сравниваемые группы: "
+            f"{rendered}."
+        )
     base_curves = _test_curves(baseline)
     reinf_curves = _test_curves(reinforced)
     if not base_curves or not reinf_curves:
         raise ValueError("В каждой сравниваемой группе нужна хотя бы одна кривая.")
-    base_pairs = _pair_mapping(baseline)
-    reinf_pairs = _pair_mapping(reinforced)
-    common_pairs = [pair for pair in base_pairs if pair in reinf_pairs]
-    paired = bool(common_pairs) and (
-        len(common_pairs) == len(base_curves) == len(reinf_curves)
-        and len(base_pairs) == len(base_curves)
-        and len(reinf_pairs) == len(reinf_curves)
+    pairing = resolve_pairing_design(
+        baseline,
+        reinforced,
+        baseline_test_ids=baseline_test_ids,
+        reinforced_test_ids=reinforced_test_ids,
     )
+    missing_curve_issues = [
+        *(f"missing_analyzable_curve:baseline:{test_id}" for test_id in baseline_test_ids if test_id not in base_curves),
+        *(f"missing_analyzable_curve:reinforced:{test_id}" for test_id in reinforced_test_ids if test_id not in reinf_curves),
+    ]
+    if missing_curve_issues:
+        existing_issues = (
+            []
+            if pairing.analysis_design == "paired"
+            else pairing.pairing_reason.split(";")
+        )
+        pairing = _independent_pairing_resolution([*existing_issues, *missing_curve_issues])
+    paired = pairing.analysis_design == "paired"
+    common_pairs = list(pairing.pair_ids)
     if paired:
         base_curves_used = {
-            pair: base_curves[base_pairs[pair]]
+            pair: base_curves[pairing.baseline_test_by_pair[pair]]
             for pair in common_pairs
-            if base_pairs[pair] in base_curves and reinf_pairs[pair] in reinf_curves
         }
-        common_pairs = list(base_curves_used)
-        reinf_curves_used = {pair: reinf_curves[reinf_pairs[pair]] for pair in common_pairs}
-        if not common_pairs:
-            paired = False
+        reinf_curves_used = {
+            pair: reinf_curves[pairing.reinforced_test_by_pair[pair]]
+            for pair in common_pairs
+        }
     if not paired:
         base_curves_used = base_curves
         reinf_curves_used = reinf_curves
@@ -710,7 +1355,16 @@ def compare_groups(
         raise ValueError("У групп нет общей области давления.")
     _, base_matrix, _ = _curve_matrix(base_curves_used, grid, 1e-8)
     _, reinf_matrix, _ = _curve_matrix(reinf_curves_used, grid, 1e-8)
-    shared_support = np.isfinite(base_matrix).any(axis=0) & np.isfinite(reinf_matrix).any(axis=0)
+    if paired:
+        pairwise_finite = np.isfinite(base_matrix) & np.isfinite(reinf_matrix)
+        base_matrix = np.where(pairwise_finite, base_matrix, np.nan)
+        reinf_matrix = np.where(pairwise_finite, reinf_matrix, np.nan)
+        shared_support = pairwise_finite.any(axis=0)
+    else:
+        shared_support = (
+            np.isfinite(base_matrix).any(axis=0)
+            & np.isfinite(reinf_matrix).any(axis=0)
+        )
     grid = grid[shared_support]
     base_matrix = base_matrix[:, shared_support]
     reinf_matrix = reinf_matrix[:, shared_support]
@@ -864,6 +1518,10 @@ def compare_groups(
             "n_reinforced": n_reinf_at,
             "n_pairs": n_pairs_at,
             "analysis_design": "paired" if paired else "independent",
+            "pairing_status": pairing.pairing_status,
+            "pairing_reason": pairing.pairing_reason,
+            "pairing_warning": pairing.pairing_warning,
+            "pair_ids_used": ",".join(pairing.pair_ids) if paired else "",
             "effect_size": effect_size,
             "effect_size_name": effect_name,
             "effect_size_ci_low": effect_low,
@@ -1121,50 +1779,104 @@ def center_and_tilt(
     reference_sign: float = -1.0,
     scale_to_mm: float = 1.0,
     indicator_resolution_mm: float = 0.0,
+    channels: Iterable[str] | None = None,
+    missing_channel_policy: str = "block",
 ) -> pd.DataFrame:
-    """Fit indicator plane only for rows with explicitly confirmed calibration."""
+    """Fit a plane on one fixed channel set using the shared core primitive."""
+
+    if {"aggregation_method", "aggregation_status"}.issubset(frame.columns):
+        saved = frame[frame["aggregation_method"].eq("plane_center")]
+        rows: list[dict[str, Any]] = []
+        for index, row in saved.iterrows():
+            used_raw = row.get("channels_used", "[]")
+            try:
+                used = json.loads(str(used_raw))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                used = []
+            status = str(row.get("aggregation_status") or "blocked_invalid_policy")
+            rows.append(
+                {
+                    "source_index": index,
+                    "test_id": str(row["test_id"]),
+                    "stage": row.get("stage"),
+                    "center_settlement_mm": (
+                        float(row["aggregated_settlement_mm"])
+                        if status == "ok"
+                        and pd.notna(row.get("aggregated_settlement_mm"))
+                        else np.nan
+                    ),
+                    "plane_rank": row.get("plane_rank"),
+                    "plane_residual_rms_mm": row.get("plane_residual_rms_mm"),
+                    "tilt_magnitude_mm_per_mm": row.get(
+                        "tilt_magnitude_mm_per_mm"
+                    ),
+                    "tilt_direction_deg": row.get("tilt_direction_deg"),
+                    "tilt_direction_resolved": bool(
+                        row.get("tilt_direction_resolved", False)
+                    )
+                    if pd.notna(row.get("tilt_direction_resolved"))
+                    else False,
+                    "n_indicators": len(used),
+                    "channels_required": row.get("channels_required", "[]"),
+                    "channels_used": used_raw,
+                    "missing_channels": row.get("missing_channels", "[]"),
+                    "aggregation_status": status,
+                    "indicator_mode": row.get("indicator_mode"),
+                    "indicator_unit": row.get("indicator_unit"),
+                    "indicator_calibration_factor": row.get(
+                        "indicator_calibration_factor"
+                    ),
+                }
+            )
+        return pd.DataFrame(rows)
 
     if not indicator_positions_mm or len(indicator_positions_mm) < 3:
         return pd.DataFrame()
-    raw_columns = [name for name in indicator_positions_mm if name in frame.columns]
-    calibrated_channel_mode = any(
-        f"{name}_settlement_mm" in frame for name in indicator_positions_mm
-    )
-    columns = (
-        [name for name in indicator_positions_mm if f"{name}_settlement_mm" in frame]
-        if calibrated_channel_mode
-        else raw_columns
-    )
-    if len(columns) < 3:
+    if missing_channel_policy not in {"block", "allow_if_solvable"}:
+        raise ValueError(
+            "missing_channel_policy должен быть block или allow_if_solvable."
+        )
+    if channels is None:
         return pd.DataFrame()
-    positions = np.array([indicator_positions_mm[name] for name in columns], dtype=float)
-    design = np.column_stack([np.ones(len(columns)), positions])
-    span = max(
-        (
-            float(np.linalg.norm(positions[i] - positions[j]))
-            for i in range(len(positions))
-            for j in range(i + 1, len(positions))
-        ),
-        default=0.0,
+    required = tuple(channels)
+    if (
+        len(required) < 3
+        or len(required) != len(set(required))
+        or any(name not in indicator_positions_mm for name in required)
+    ):
+        return pd.DataFrame()
+    calibrated_channel_mode = any(
+        f"{name}_settlement_mm" in frame for name in required
     )
     rows = []
     for index, row in frame.iterrows():
-        if not calibrated_channel_mode and not bool(row.get("indicator_calibration_confirmed", False)):
+        if not bool(row.get("indicator_calibration_confirmed", False)):
             continue
         row_indicator_sign = float(row.get("indicator_sign", indicator_sign))
         row_reference_sign = float(row.get("reference_sign", reference_sign))
         row_scale = float(row.get("indicator_scale_to_mm", scale_to_mm))
         row_calibration_factor = float(row.get("indicator_calibration_factor", 1.0))
-        calibrated_columns = [f"{name}_settlement_mm" for name in columns]
+        values: dict[str, float] = {}
         if calibrated_channel_mode:
-            z = pd.to_numeric(row[calibrated_columns], errors="coerce").to_numpy(dtype=float)
+            for name in required:
+                value = pd.to_numeric(
+                    pd.Series([row.get(f"{name}_settlement_mm")]), errors="coerce"
+                ).iloc[0]
+                if pd.notna(value):
+                    values[name] = float(value)
         else:
-            z = (
-                pd.to_numeric(row[columns], errors="coerce").to_numpy(dtype=float)
-                * row_indicator_sign
-                * row_scale
-                * row_calibration_factor
-            )
+            for name in required:
+                value = pd.to_numeric(
+                    pd.Series([row.get(name)]), errors="coerce"
+                ).iloc[0]
+                if pd.notna(value):
+                    values[name] = (
+                        float(value)
+                        * row_indicator_sign
+                        * row_scale
+                        * row_calibration_factor
+                    )
+        reference_missing = False
         if bool(row.get("reference_channel_used", False)) and "reference_indicator" in frame:
             reference_column = (
                 "reference_indicator_settlement_mm"
@@ -1173,41 +1885,62 @@ def center_and_tilt(
             )
             reference = pd.to_numeric(pd.Series([row.get(reference_column)]), errors="coerce").iloc[0]
             if pd.isna(reference):
-                continue
-            if calibrated_channel_mode and reference_column.endswith("_settlement_mm"):
-                z = z + float(reference)
+                reference_missing = True
             else:
-                z = (
-                    z
-                    + row_reference_sign
+                correction = (
+                    float(reference)
+                    if calibrated_channel_mode
+                    and reference_column.endswith("_settlement_mm")
+                    else row_reference_sign
                     * float(reference)
                     * row_scale
                     * row_calibration_factor
                 )
-        finite = np.isfinite(z)
-        if finite.sum() < 3 or np.linalg.matrix_rank(design[finite]) < 3:
-            continue
-        coefficients, *_ = np.linalg.lstsq(design[finite], z[finite], rcond=None)
-        bx, by = float(coefficients[1]), float(coefficients[2])
-        magnitude = math.hypot(bx, by)
+                values = {name: value + correction for name, value in values.items()}
+        used = tuple(name for name in required if name in values)
+        missing = tuple(name for name in required if name not in values)
         row_resolution = float(row.get("indicator_resolution_mm", indicator_resolution_mm))
-        direction_resolved = bool(
-            span > 0 and magnitude * span >= max(row_resolution, np.finfo(float).eps * span)
+        plane = fit_indicator_plane(
+            values,
+            {name: indicator_positions_mm[name] for name in used},
+            indicator_resolution_mm=row_resolution,
         )
+        if reference_missing or (
+            missing and missing_channel_policy == "block"
+        ) or len(used) < 3:
+            status = "blocked_missing_channels"
+        elif plane.rank < 3:
+            status = "blocked_collinear_geometry"
+        else:
+            status = "ok"
         rows.append(
             {
                 "source_index": index,
                 "test_id": str(row["test_id"]),
                 "stage": row["stage"],
-                "center_settlement_mm": float(coefficients[0]),
-                "tilt_magnitude_mm_per_mm": magnitude,
+                "center_settlement_mm": (
+                    plane.center_settlement_mm if status == "ok" else np.nan
+                ),
+                "plane_rank": plane.rank,
+                "plane_residual_rms_mm": plane.residual_rms_mm,
+                "tilt_magnitude_mm_per_mm": plane.tilt_magnitude_mm_per_mm,
                 "tilt_direction_deg": (
-                    (math.degrees(math.atan2(by, bx)) + 360.0) % 360.0
-                    if direction_resolved
+                    plane.tilt_direction_deg
+                    if plane.tilt_direction_deg is not None
                     else np.nan
                 ),
-                "tilt_direction_resolved": direction_resolved,
-                "n_indicators": int(finite.sum()),
+                "tilt_direction_resolved": plane.tilt_direction_resolved,
+                "n_indicators": len(used),
+                "channels_required": json.dumps(
+                    list(required), ensure_ascii=False, separators=(",", ":")
+                ),
+                "channels_used": json.dumps(
+                    list(used), ensure_ascii=False, separators=(",", ":")
+                ),
+                "missing_channels": json.dumps(
+                    list(missing), ensure_ascii=False, separators=(",", ":")
+                ),
+                "aggregation_status": status,
                 "indicator_mode": row.get("indicator_mode"),
                 "indicator_unit": row.get("indicator_unit"),
                 "indicator_calibration_factor": row_calibration_factor,

@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime
 
 import pandas as pd
 import pytest
 
-from soilstamp.manual_entry_models import MANUAL_DRAFT_SCHEMA_VERSION, ManualDraft
+from soilstamp.manual_entry_models import (
+    MANUAL_DRAFT_SCHEMA_VERSION,
+    ManualDraft,
+    ManualIndicatorPassport,
+)
 from soilstamp.manual_entry_service import (
     ClipboardShapeError,
     ConfirmationRequiredError,
     EditorConflictError,
     HistoryEmptyError,
     ManualEntryService,
+    ManualEntryServiceError,
     editor_frame,
     parse_rectangular_tsv,
 )
@@ -78,6 +84,313 @@ def test_update_passport_and_reinforcement_fields_are_audited() -> None:
         datetime.fromisoformat(event.timestamp).tzinfo is not None
         for event in service.draft.audit_events
     )
+
+
+def test_sensitive_update_with_default_reason_invalidates_stale_confirmation() -> None:
+    service = _service()
+    service.draft.passport.indicator_passports["indicator_1"] = (
+        ManualIndicatorPassport(
+            serial_number="ORIGINAL-01",
+            assignment_status="confirmed",
+        )
+    )
+    service.draft.passport.metrology_status = "confirmed"
+    changed_passports = service.draft.passport.to_dict()["indicator_passports"]
+    changed_passports["indicator_1"]["serial_number"] = "REPLACED-02"
+
+    assert service.update_passport(
+        {
+            "indicator_passports": changed_passports,
+            "metrology_status": "confirmed",
+        }
+    )
+
+    effective = service.draft.passport.indicator_passports["indicator_1"]
+    assert effective is not None and effective.serial_number == "REPLACED-02"
+    assert service.draft.passport.metrology_status == "draft"
+    assert [event.action for event in service.draft.audit_events] == [
+        "update_passport",
+        "invalidate_metrology_confirmation",
+    ]
+    invalidation = service.draft.audit_events[-1]
+    assert invalidation.field == "metrology_status"
+    assert invalidation.old_value == "confirmed"
+    assert invalidation.new_value == "draft"
+    assert invalidation.reason == "manual_edit"
+
+
+def test_sensitive_update_can_be_explicitly_reconfirmed_with_reason() -> None:
+    service = _service()
+    service.draft.passport.indicator_passports["indicator_1"] = (
+        ManualIndicatorPassport(
+            serial_number="ORIGINAL-01",
+            assignment_status="confirmed",
+        )
+    )
+    service.draft.passport.metrology_status = "confirmed"
+    changed_passports = service.draft.passport.to_dict()["indicator_passports"]
+    changed_passports["indicator_1"]["serial_number"] = "REPLACED-02"
+    reason = "Инженер повторно проверил назначение после замены номера"
+
+    assert service.update_passport(
+        {
+            "indicator_passports": changed_passports,
+            "metrology_status": "confirmed",
+        },
+        author="metrologist",
+        reason=reason,
+    )
+
+    assert service.draft.passport.metrology_status == "confirmed"
+    assert [event.action for event in service.draft.audit_events] == [
+        "update_passport",
+        "reconfirm_metrology_after_update",
+    ]
+    reconfirmation = service.draft.audit_events[-1]
+    assert reconfirmation.field == "metrology_status"
+    assert reconfirmation.old_value == "confirmed"
+    assert reconfirmation.new_value == "confirmed"
+    assert reconfirmation.author == "metrologist"
+    assert reconfirmation.reason == reason
+
+
+def test_non_metrology_update_does_not_invalidate_confirmation() -> None:
+    service = _service()
+    service.draft.passport.metrology_status = "confirmed"
+
+    assert service.update_passport({"project_name": "Updated project"})
+
+    assert service.draft.passport.project_name == "Updated project"
+    assert service.draft.passport.metrology_status == "confirmed"
+    assert [event.action for event in service.draft.audit_events] == [
+        "update_passport"
+    ]
+    assert service.draft.audit_events[0].field == "project_name"
+
+
+def test_experiment_date_change_invalidates_confirmed_verification_basis() -> None:
+    service = _service()
+    service.draft.passport.test_date = "2026-01-15"
+    service.draft.passport.metrology_status = "confirmed"
+
+    assert service.update_passport({"test_date": "2027-02-20"})
+
+    assert service.draft.passport.test_date == "2027-02-20"
+    assert service.draft.passport.metrology_status == "draft"
+    assert [event.action for event in service.draft.audit_events] == [
+        "update_passport",
+        "invalidate_metrology_confirmation",
+    ]
+    assert service.draft.audit_events[0].field == "test_date"
+    invalidation = service.draft.audit_events[1]
+    assert invalidation.old_value == "confirmed"
+    assert invalidation.new_value == "draft"
+
+
+@pytest.mark.parametrize("initial_status", ["draft", "migration_review_required"])
+def test_default_reason_cannot_confirm_metrology_directly(initial_status: str) -> None:
+    service = _service()
+    service.draft.passport.metrology_status = initial_status
+    before = service.draft.to_json(indent=None)
+
+    with pytest.raises(ManualEntryServiceError, match="обоснование reason"):
+        service.update_passport({"metrology_status": "confirmed"})
+
+    assert service.draft.to_json(indent=None) == before
+    assert service.draft.passport.metrology_status == initial_status
+    assert service.draft.audit_events == []
+    assert not service.can_undo
+
+
+def test_explicit_reason_allows_direct_metrology_confirmation() -> None:
+    service = _service()
+    reason = "Инженер проверил все поканальные паспорта и агрегацию"
+
+    assert service.update_passport(
+        {"metrology_status": "confirmed"},
+        author="metrologist",
+        reason=reason,
+    )
+
+    assert service.draft.passport.metrology_status == "confirmed"
+    assert len(service.draft.audit_events) == 1
+    confirmation = service.draft.audit_events[0]
+    assert confirmation.action == "update_passport"
+    assert confirmation.field == "metrology_status"
+    assert confirmation.old_value == "draft"
+    assert confirmation.new_value == "confirmed"
+    assert confirmation.reason == reason
+
+
+def test_copy_indicator_passport_is_explicit_independent_and_audited() -> None:
+    service = _service()
+    source = ManualIndicatorPassport(
+        type="ИЧ-10",
+        serial_number="SOURCE-01",
+        instrument_id="INST-01",
+        range_mm="10,000",
+        division_mm="0,010",
+        correction_factor="1,002",
+        mode="decreasing_wrapped",
+        initial_reading="9,800",
+        initial_turn=0,
+        zero_correction_mm="0,000",
+        max_increment_mm="2,000",
+        reverse_tolerance_mm="0,020",
+        travel_range_mm="50,0",
+        verification_date="2026-01-15",
+        verification_valid_until="2027-01-15",
+        x_mm="-100,0",
+        y_mm="0,0",
+        cumulative_sign="1,0",
+        assignment_status="confirmed",
+    )
+    service.draft.passport.indicator_passports["indicator_1"] = source
+    service.draft.passport.metrology_status = "confirmed"
+
+    assert service.copy_indicator_passport(
+        "indicator_1",
+        ["indicator_2", "reference_indicator"],
+        author="metrologist",
+        reason="Явно назначить одинаковый тип прибора двум каналам",
+    )
+
+    first = service.draft.passport.indicator_passports["indicator_2"]
+    second = service.draft.passport.indicator_passports["reference_indicator"]
+    assert first is not None and second is not None
+    expected = source.to_dict()
+    expected["assignment_status"] = "review_required"
+    assert first.to_dict() == expected == second.to_dict()
+    assert first is not source and second is not source and first is not second
+    assert source.assignment_status == "confirmed"
+    assert service.draft.passport.metrology_status == "draft"
+    events = service.draft.audit_events
+    assert [event.action for event in events] == [
+        "copy_indicator_passport",
+        "copy_indicator_passport",
+        "invalidate_metrology_confirmation",
+    ]
+    assert [event.field for event in events] == [
+        "indicator_passports.indicator_2",
+        "indicator_passports.reference_indicator",
+        "metrology_status",
+    ]
+    assert all(event.author == "metrologist" for event in events)
+    assert [event.old_value for event in events] == [None, None, "confirmed"]
+    assert [event.new_value for event in events] == [expected, expected, "draft"]
+
+    source.serial_number = "CHANGED-AFTER-COPY"
+    assert first.serial_number == "SOURCE-01"
+    assert second.serial_number == "SOURCE-01"
+
+
+def _draft_bytes_allowing_injected_nan(service: ManualEntryService) -> bytes:
+    return json.dumps(
+        service.draft.to_dict(),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=True,
+    ).encode("utf-8")
+
+
+def test_copy_indicator_passport_nan_validation_is_byte_atomic() -> None:
+    service = _service()
+    source = ManualIndicatorPassport(
+        serial_number="SOURCE-01",
+        assignment_status="confirmed",
+    )
+    # Simulate a corrupt integration bypassing the typed service API.  The copy
+    # command must detect it while staging and leave every live byte untouched.
+    source.range_mm = float("nan")  # type: ignore[assignment]
+    service.draft.passport.indicator_passports["indicator_1"] = source
+    service.draft.passport.metrology_status = "confirmed"
+    before = _draft_bytes_allowing_injected_nan(service)
+    updated_at = service.draft.updated_at
+    audit_count = len(service.draft.audit_events)
+    undo_count = len(service._undo_stack)
+    redo_count = len(service._redo_stack)
+
+    with pytest.raises(ValueError, match="range_mm"):
+        service.copy_indicator_passport(
+            "indicator_1",
+            ["indicator_2"],
+            author="metrologist",
+            reason="Проверка атомарности",
+        )
+
+    assert _draft_bytes_allowing_injected_nan(service) == before
+    assert service.draft.updated_at == updated_at
+    assert len(service.draft.audit_events) == audit_count
+    assert len(service._undo_stack) == undo_count
+    assert len(service._redo_stack) == redo_count
+    assert service.draft.passport.metrology_status == "confirmed"
+
+
+def test_copy_indicator_passport_exact_prepared_target_is_true_noop() -> None:
+    service = _service()
+    source = ManualIndicatorPassport(
+        type="ИЧ-10",
+        serial_number="SOURCE-01",
+        instrument_id="INST-01",
+        assignment_status="confirmed",
+    )
+    prepared_target = deepcopy(source)
+    prepared_target.assignment_status = "review_required"
+    service.draft.passport.indicator_passports["indicator_1"] = source
+    service.draft.passport.indicator_passports["indicator_2"] = prepared_target
+    service.draft.passport.metrology_status = "confirmed"
+    service.update_passport({"project_name": "Existing undo command"})
+    before = service.draft.to_json(indent=None)
+    updated_at = service.draft.updated_at
+    audit_count = len(service.draft.audit_events)
+    undo_count = len(service._undo_stack)
+    redo_count = len(service._redo_stack)
+
+    changed = service.copy_indicator_passport(
+        "indicator_1",
+        ["indicator_2"],
+        author="metrologist",
+        reason="Повторная команда без изменения",
+    )
+
+    assert changed is False
+    assert service.draft.to_json(indent=None) == before
+    assert service.draft.updated_at == updated_at
+    assert len(service.draft.audit_events) == audit_count
+    assert len(service._undo_stack) == undo_count
+    assert len(service._redo_stack) == redo_count
+    assert service.draft.passport.metrology_status == "confirmed"
+
+
+@pytest.mark.parametrize(
+    "source,targets,reason,match",
+    [
+        ("indicator_1", ["indicator_2"], "", "reason"),
+        ("indicator_5", ["indicator_2"], "valid reason", "исходный"),
+        ("indicator_1", [], "valid reason", "хотя бы один"),
+        ("indicator_1", ["indicator_2", "indicator_2"], "valid reason", "повторы"),
+        ("indicator_1", ["indicator_1"], "valid reason", "Исходный канал"),
+    ],
+)
+def test_copy_indicator_passport_rejects_invalid_command_atomically(
+    source: str, targets: list[str], reason: str, match: str
+) -> None:
+    service = _service()
+    service.draft.passport.indicator_passports["indicator_1"] = (
+        ManualIndicatorPassport(serial_number="SOURCE-01")
+    )
+    before = service.draft.to_dict()
+
+    with pytest.raises(ManualEntryServiceError, match=match):
+        service.copy_indicator_passport(
+            source,
+            targets,
+            author="metrologist",
+            reason=reason,
+        )
+
+    assert service.draft.to_dict() == before
 
 
 def test_add_insert_duplicate_delete_keep_uuid_and_auto_renumber() -> None:
@@ -352,7 +665,7 @@ def test_draft_loader_rejects_malformed_audit_passport_and_source_provenance() -
     [
         ("is_reinforced", "false", "is_reinforced"),
         ("number_of_indicators", 1.5, "number_of_indicators"),
-        ("indicator_serial_numbers", {"0": "I-1"}, "indicator_serial_numbers"),
+        ("indicator_passports", {"indicator_1": None}, "indicator_passports"),
         ("reinforcement", [1], "reinforcement"),
     ],
 )

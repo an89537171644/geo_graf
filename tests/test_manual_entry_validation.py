@@ -4,7 +4,11 @@ from copy import deepcopy
 
 import pytest
 
-from soilstamp.manual_entry_models import ManualDraft, ManualPoint
+from soilstamp.manual_entry_models import (
+    ManualDraft,
+    ManualIndicatorPassport,
+    ManualPoint,
+)
 from soilstamp.manual_entry_validation import validate_manual_draft
 
 
@@ -33,19 +37,36 @@ def _valid_draft() -> ManualDraft:
         "load_zero": "0",
         "lever_ratio": "1",
         "settlement_unit": "mm",
-        "dial_mode": "cumulative_settlement",
-        "dial_range_mm": "10",
-        "dial_resolution_mm": "0,01",
-        "dial_correction_factor": "1",
-        "dial_zero_correction_mm": "0",
-        "indicator_type": "ИЧ-10",
-        "indicator_serial_numbers": ["I-1"],
-        "verification_date": "2026-01-01",
-        "verification_valid_until": "2030-01-01",
         "number_of_indicators": 1,
+        "settlement_aggregation": "primary_channel",
+        "settlement_aggregation_channels": ["indicator_1"],
+        "settlement_primary_channel": "indicator_1",
+        "settlement_missing_channel_policy": "block",
+        "metrology_status": "confirmed",
     }
     for name, value in values.items():
         setattr(passport, name, value)
+    passport.indicator_passports["indicator_1"] = ManualIndicatorPassport(
+        type="ИЧ-10",
+        serial_number="I-1",
+        instrument_id="I-1",
+        range_mm="10",
+        division_mm="0,01",
+        correction_factor="1",
+        mode="cumulative_settlement",
+        initial_reading="0",
+        initial_turn=0,
+        zero_correction_mm="0",
+        max_increment_mm="2",
+        reverse_tolerance_mm="0,02",
+        travel_range_mm="50",
+        verification_date="2026-01-01",
+        verification_valid_until="2030-01-01",
+        x_mm="0",
+        y_mm="0",
+        cumulative_sign="1",
+        assignment_status="confirmed",
+    )
     for position, row in enumerate(draft.rows):
         row.stage_no = str(position)
         row.elapsed_time_s = str(position * 60)
@@ -66,15 +87,19 @@ def test_valid_manual_draft_can_be_analyzed() -> None:
     assert result.blocking_issues == []
 
 
-def test_inactive_indicator_serials_are_preserved_without_blocking() -> None:
+def test_inactive_indicator_passports_are_preserved_without_blocking() -> None:
     draft = _valid_draft()
-    draft.passport.indicator_serial_numbers = ["I-1", "I-2", "", ""]
+    inactive = deepcopy(draft.passport.indicator_passports["indicator_1"])
+    assert inactive is not None
+    inactive.serial_number = "I-2"
+    inactive.instrument_id = "I-2"
+    draft.passport.indicator_passports["indicator_2"] = inactive
 
     result = validate_manual_draft(draft)
 
     assert result.can_analyze
     assert any(
-        issue.code == "inactive_manual_indicator_serial"
+        issue.code == "inactive_manual_indicator_passport"
         and not bool(issue.blocks_processing)
         for issue in result.issues
     )
@@ -114,9 +139,37 @@ def test_reinforcement_fields_are_conditional() -> None:
 
     codes = _codes(draft)
 
-    assert "missing_manual_passport_field" in codes
+    assert "missing_manual_passport_field" not in codes
     assert "missing_manual_reinforcement_field" in codes
     assert "invalid_manual_reinforcement_layers" in codes
+
+
+def test_baseline_group_and_pair_id_are_optional_for_a_standalone_test() -> None:
+    draft = _valid_draft()
+    draft.passport.baseline_group = ""
+    draft.passport.pair_id = None
+
+    result = validate_manual_draft(draft)
+
+    assert result.can_analyze
+    assert not any(
+        issue.column in {"baseline_group", "pair_id"}
+        and bool(issue.blocks_processing)
+        for issue in result.issues
+    )
+
+
+def test_pair_id_edge_whitespace_is_preserved_and_reported() -> None:
+    draft = _valid_draft()
+    draft.passport.pair_id = " P1 "
+
+    result = validate_manual_draft(draft)
+    issue = next(item for item in result.issues if item.code == "noncanonical_manual_pair_id")
+
+    assert result.can_analyze
+    assert issue.level == "warning"
+    assert issue.column == "pair_id"
+    assert issue.raw_value == " P1 "
 
 
 def test_sequence_uuid_and_time_order_are_blocking_and_rows_are_addressable() -> None:
@@ -229,4 +282,74 @@ def test_fewer_than_two_measurements_is_critical() -> None:
         issue.code == "insufficient_manual_measurements"
         for issue in result.blocking_issues
     )
+
+
+def test_unknown_experiment_date_requires_review_without_system_date() -> None:
+    draft = _valid_draft()
+    draft.passport.test_date = ""
+
+    result = validate_manual_draft(draft)
+
+    reviews = [
+        issue
+        for issue in result.issues
+        if issue.code == "manual_indicator_verification_review_required"
+    ]
+    assert reviews
+    assert all(not bool(issue.blocks_processing) for issue in reviews)
+    assert result.can_analyze
+
+
+def test_all_channels_mean_requires_fixed_complete_active_basis() -> None:
+    draft = _valid_draft()
+    draft.passport.number_of_indicators = 2
+    second = deepcopy(draft.passport.indicator_passports["indicator_1"])
+    assert second is not None
+    second.serial_number = "I-2"
+    second.instrument_id = "I-2"
+    draft.passport.indicator_passports["indicator_2"] = second
+    draft.passport.settlement_aggregation = "all_channels_mean"
+    draft.passport.settlement_aggregation_channels = ["indicator_1"]
+
+    result = validate_manual_draft(draft)
+
+    assert "manual_all_channels_basis_mismatch" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_plane_center_rejects_collinear_channel_coordinates() -> None:
+    draft = _valid_draft()
+    draft.passport.number_of_indicators = 3
+    for index in (2, 3):
+        item = deepcopy(draft.passport.indicator_passports["indicator_1"])
+        assert item is not None
+        item.serial_number = f"I-{index}"
+        item.instrument_id = f"I-{index}"
+        item.x_mm = str((index - 1) * 100)
+        item.y_mm = "0"
+        draft.passport.indicator_passports[f"indicator_{index}"] = item
+    draft.passport.settlement_aggregation = "plane_center"
+    draft.passport.settlement_aggregation_channels = [
+        "indicator_1",
+        "indicator_2",
+        "indicator_3",
+    ]
+
+    result = validate_manual_draft(draft)
+
+    assert "collinear_manual_plane_coordinates" in {
+        issue.code for issue in result.blocking_issues
+    }
+
+
+def test_migrated_common_passport_is_visible_but_not_effective() -> None:
+    draft = _valid_draft()
+    draft.passport.metrology_status = "migration_review_required"
+
+    result = validate_manual_draft(draft)
+
+    assert "manual_metrology_migration_review_required" in {
+        issue.code for issue in result.blocking_issues
+    }
     assert not result.can_analyze

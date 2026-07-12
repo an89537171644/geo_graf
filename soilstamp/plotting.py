@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from io import BytesIO
-from typing import Any
+from collections.abc import Iterable, Mapping
+from typing import Any, Literal
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -14,7 +16,7 @@ from matplotlib.figure import Figure
 
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 
-from .analysis import fit_segmented_pcr, group_mean_curve
+from .analysis import aggregate_group_curve, fit_segmented_pcr
 from .data import _stable_status_mask
 from .schema import PCRResult, VERSION
 
@@ -29,6 +31,161 @@ class PlotOutput:
     caption: str
     warnings: list[str]
     curve_map: dict[int, str]
+    selection_records: list[dict[str, Any]] = field(default_factory=list)
+    plotted_points: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+
+CurveSelectionMethod = Literal[
+    "mean_curve",
+    "median_curve",
+    "manual_representative",
+    "individual_curves",
+]
+CURVE_SELECTION_METHODS = {
+    "mean_curve",
+    "median_curve",
+    "manual_representative",
+    "individual_curves",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class CurveSelectionDecision:
+    """Explicit publication decision for one experimental series."""
+
+    group: str
+    method: CurveSelectionMethod
+    test_id: str | None = None
+    author: str | None = None
+    timestamp_utc: str | None = None
+    reason: str | None = None
+
+
+CurveSelectionInput = (
+    Mapping[str, CurveSelectionDecision | Mapping[str, Any] | str]
+    | Iterable[CurveSelectionDecision | Mapping[str, Any]]
+    | None
+)
+
+
+def _parse_utc_timestamp(value: str | None) -> str:
+    rendered = str(value or "").strip()
+    if not rendered:
+        raise ValueError("Для manual_representative требуется timestamp_utc.")
+    candidate = rendered[:-1] + "+00:00" if rendered.endswith("Z") else rendered
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise ValueError(
+            "timestamp_utc для manual_representative должен быть корректным ISO 8601."
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        raise ValueError("timestamp_utc для manual_representative должен содержать часовой пояс UTC.")
+    return parsed.isoformat()
+
+
+def _coerce_curve_selection(
+    value: CurveSelectionDecision | Mapping[str, Any] | str,
+    *,
+    group_hint: str | None = None,
+) -> CurveSelectionDecision:
+    if isinstance(value, CurveSelectionDecision):
+        decision = value
+    elif isinstance(value, str):
+        if group_hint is None:
+            raise ValueError("Строковая стратегия требует имени группы.")
+        decision = CurveSelectionDecision(group=group_hint, method=value)  # type: ignore[arg-type]
+    elif isinstance(value, Mapping):
+        payload = dict(value)
+        if group_hint is not None:
+            supplied_group = payload.get("group")
+            if supplied_group is not None and str(supplied_group) != group_hint:
+                raise ValueError(
+                    f"Решение для группы {group_hint!r} содержит другую группу {supplied_group!r}."
+                )
+            payload["group"] = group_hint
+        try:
+            decision = CurveSelectionDecision(**payload)
+        except TypeError as exc:
+            raise ValueError(f"Некорректная структура выбора кривой: {exc}") from exc
+    else:
+        raise ValueError(f"Неподдерживаемый выбор кривой: {type(value).__name__}.")
+    if group_hint is not None and decision.group != group_hint:
+        raise ValueError(
+            f"Решение для группы {group_hint!r} содержит другую группу {decision.group!r}."
+        )
+    if decision.method not in CURVE_SELECTION_METHODS:
+        raise ValueError(f"Неизвестный способ выбора кривой: {decision.method!r}.")
+    return decision
+
+
+def resolve_curve_selections(
+    frame: pd.DataFrame,
+    selections: CurveSelectionInput = None,
+) -> dict[str, CurveSelectionDecision]:
+    """Resolve explicit, order-independent publication selections.
+
+    A single-test group is unambiguous and therefore defaults to
+    ``individual_curves``. Every repeated group requires a supplied decision.
+    """
+
+    if "group" not in frame or "test_id" not in frame:
+        raise ValueError("Для выбора публикационных кривых нужны group и test_id.")
+    groups = sorted(frame["group"].dropna().astype(str).unique().tolist())
+    supplied: dict[str, CurveSelectionDecision] = {}
+    if selections is None:
+        pass
+    elif isinstance(selections, Mapping):
+        for raw_group, value in selections.items():
+            group = str(raw_group)
+            if group in supplied:
+                raise ValueError(f"Выбор для группы {group!r} задан повторно.")
+            supplied[group] = _coerce_curve_selection(value, group_hint=group)
+    else:
+        for value in selections:
+            decision = _coerce_curve_selection(value)
+            if decision.group in supplied:
+                raise ValueError(f"Выбор для группы {decision.group!r} задан повторно.")
+            supplied[decision.group] = decision
+    unknown = sorted(set(supplied) - set(groups))
+    if unknown:
+        raise ValueError(f"Выбор задан для отсутствующих групп: {', '.join(unknown)}.")
+
+    resolved: dict[str, CurveSelectionDecision] = {}
+    for group in groups:
+        group_frame = frame[frame["group"].astype(str) == group]
+        test_ids = sorted(group_frame["test_id"].dropna().astype(str).unique().tolist())
+        decision = supplied.get(group)
+        if decision is None:
+            if len(test_ids) != 1:
+                raise ValueError(
+                    f"Группа {group!r} содержит {len(test_ids)} повторностей; явно выберите "
+                    "mean_curve, median_curve, manual_representative или individual_curves."
+                )
+            decision = CurveSelectionDecision(group=group, method="individual_curves")
+        if decision.method == "manual_representative":
+            test_id = str(decision.test_id or "")
+            author = str(decision.author or "").strip()
+            reason = str(decision.reason or "").strip()
+            if test_id not in test_ids:
+                raise ValueError(
+                    f"manual_representative для {group!r}: test_id {test_id!r} не входит в группу."
+                )
+            if not author:
+                raise ValueError("Для manual_representative требуется author.")
+            if not reason:
+                raise ValueError("Для manual_representative требуется непустой reason.")
+            timestamp = _parse_utc_timestamp(decision.timestamp_utc)
+            decision = CurveSelectionDecision(
+                group=group,
+                method=decision.method,
+                test_id=test_id,
+                author=author,
+                timestamp_utc=timestamp,
+                reason=reason,
+            )
+        resolved[group] = decision
+    return resolved
 
 
 def _axis_spec(frame: pd.DataFrame, axis_mode: str) -> tuple[pd.Series, pd.Series, str, str, list[str]]:
@@ -144,16 +301,25 @@ def _reasonable_limits(
 
 
 def _failure_x(part: pd.DataFrame, x: pd.Series) -> tuple[float | None, float | None, bool]:
-    x_local = x.loc[part.index]
-    failure = part[part.get("is_failure", pd.Series(False, index=part.index)).astype(bool)]
-    if not failure.empty:
-        row_index = failure.index[0]
+    ordered = (
+        part.sort_values("sequence_no", kind="stable") if "sequence_no" in part else part
+    )
+    x_local = x.loc[ordered.index]
+    failure_mask = ordered.get(
+        "is_failure", pd.Series(False, index=ordered.index)
+    ).astype(bool)
+    failure_positions = np.flatnonzero(failure_mask.to_numpy())
+    if len(failure_positions):
+        failure_position = int(failure_positions[0])
+        row_index = ordered.index[failure_position]
         value = x_local.loc[row_index]
-        before = part.loc[:row_index].iloc[:-1]
-        stable_idx = before[x_local.loc[before.index].notna() & _stable_status_mask(before)].index
+        before = ordered.iloc[:failure_position]
+        stable_idx = before[
+            x_local.loc[before.index].notna() & _stable_status_mask(before)
+        ].index
         lower = float(x_local.loc[stable_idx[-1]]) if len(stable_idx) else None
         return float(value) if pd.notna(value) else None, lower, False
-    valid = x_local[_stable_status_mask(part)].dropna()
+    valid = x_local[_stable_status_mask(ordered)].dropna()
     return (float(valid.max()) if not valid.empty else None), None, True
 
 
@@ -208,77 +374,6 @@ def _draw_failure_event(
     return [event_x]
 
 
-def _draw_group_failure_event(
-    ax: mpl.axes.Axes,
-    group: pd.DataFrame,
-    x: pd.Series,
-    *,
-    curve_number: int,
-    label_level: int,
-) -> list[float]:
-    """Draw one non-overlapping publication event per plotted group curve."""
-
-    reached: list[tuple[float, float | None]] = []
-    censored: list[float] = []
-    all_events: list[float] = []
-    for _, part in group.groupby("test_id", sort=False):
-        event_x, lower, is_censored = _failure_x(part, x)
-        if event_x is None:
-            continue
-        all_events.append(event_x)
-        if is_censored:
-            censored.append(event_x)
-        else:
-            reached.append((event_x, lower))
-    if reached:
-        event_x = float(np.mean([item[0] for item in reached]))
-        lower_values = [item[1] for item in reached if item[1] is not None]
-        lower = float(np.mean(lower_values)) if lower_values else None
-        if lower is not None:
-            ax.axvspan(min(lower, event_x), max(lower, event_x), color="black", alpha=0.06, zorder=0)
-        ax.axvline(event_x, color="black", linestyle=":", linewidth=1.0)
-        label = f"разрушение, кривая {curve_number}"
-        if censored:
-            label += " (+ценз.)"
-        if lower is not None:
-            symbol = "Fu" if x.name == "F_kN" else ("p/pu" if x.name == "p_over_pu" else "pu")
-            label += f"\n{lower:.3g} < {symbol} ≤ {event_x:.3g}"
-        ax.annotate(
-            label,
-            xy=(event_x, 0.995),
-            xycoords=("data", "axes fraction"),
-            xytext=(event_x, 0.955 - 0.055 * label_level),
-            textcoords=("data", "axes fraction"),
-            arrowprops={"arrowstyle": "-|>", "color": "black", "lw": 0.8},
-            ha="center",
-            va="top",
-            fontsize=8,
-            color="black",
-            annotation_clip=False,
-        )
-    elif censored:
-        event_x = float(max(censored))
-        if x.name == "F_kN":
-            censor_label = f"Fu > Fmax, кривая {curve_number}"
-        elif x.name == "p_kPa":
-            censor_label = f"pu > pmax, кривая {curve_number}"
-        else:
-            censor_label = f"предел не достигнут, кривая {curve_number}"
-        ax.annotate(
-            censor_label,
-            xy=(event_x, 0.995),
-            xycoords=("data", "axes fraction"),
-            xytext=(event_x, 0.955 - 0.055 * label_level),
-            textcoords=("data", "axes fraction"),
-            ha="center",
-            va="top",
-            fontsize=8,
-            color="black",
-            annotation_clip=False,
-        )
-    return all_events
-
-
 def _label_curve_numbers(
     ax: mpl.axes.Axes, endpoints: list[tuple[float, float, int]], y_span: float
 ) -> None:
@@ -312,6 +407,82 @@ def _label_curve_numbers(
         )
 
 
+def _ordered_test_part(part: pd.DataFrame) -> pd.DataFrame:
+    if "sequence_no" in part:
+        return part.sort_values("sequence_no", kind="stable")
+    return part
+
+
+def _aggregate_points(
+    group: pd.DataFrame,
+    *,
+    axis_mode: str,
+    statistic: Literal["mean", "median"],
+    confidence: float,
+    bootstrap: int,
+    seed: int,
+) -> pd.DataFrame:
+    result = aggregate_group_curve(
+        group,
+        axis_mode=axis_mode,
+        statistic=statistic,
+        confidence=confidence,
+        bootstrap=bootstrap,
+        seed=seed,
+    ).copy()
+    required = {"x", "y", "n", "measured_n", "interpolated_n"}
+    missing = sorted(required.difference(result.columns))
+    if missing:
+        raise ValueError(f"Агрегация кривой не вернула столбцы: {missing}.")
+    result["x"] = pd.to_numeric(result["x"], errors="coerce")
+    result["y"] = pd.to_numeric(result["y"], errors="coerce")
+    if "draw_marker" not in result:
+        result["draw_marker"] = pd.to_numeric(
+            result["interpolated_n"], errors="coerce"
+        ).fillna(0).eq(0)
+    result["draw_marker"] = result["draw_marker"].fillna(False).astype(bool)
+    finite = np.isfinite(result["x"]) & np.isfinite(result["y"])
+    result = result.loc[finite].sort_values("x", kind="stable").reset_index(drop=True)
+    if result.empty:
+        raise ValueError("После агрегации не осталось конечных точек для графика.")
+    return result
+
+
+def _raw_plot_points(
+    part: pd.DataFrame,
+    x: pd.Series,
+    y: pd.Series,
+    *,
+    axis_mode: str,
+    group: str,
+    test_id: str,
+    curve_number: int,
+    selection_method: str,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+    ordered = _ordered_test_part(part)
+    px = x.loc[ordered.index]
+    py = y.loc[ordered.index]
+    valid = px.notna() & py.notna() & ~ordered.get(
+        "is_failure", pd.Series(False, index=ordered.index)
+    ).astype(bool)
+    points = pd.DataFrame(
+        {
+            "group": group,
+            "test_id": test_id,
+            "curve_number": curve_number,
+            "selection_method": selection_method,
+            "axis_mode": axis_mode,
+            "x": px[valid].to_numpy(dtype=float),
+            "y": py[valid].to_numpy(dtype=float),
+            "n": 1,
+            "measured_n": 1,
+            "interpolated_n": 0,
+            "draw_marker": True,
+        }
+    )
+    return points, px, py, valid
+
+
 def plot_curves(
     frame: pd.DataFrame,
     *,
@@ -324,6 +495,8 @@ def plot_curves(
     pcr_result: PCRResult | None = None,
     bootstrap: int = 500,
     seed: int = 202604,
+    confidence: float = 0.95,
+    selections: CurveSelectionInput = None,
 ) -> PlotOutput:
     if frame.empty:
         raise ValueError("Нет данных для графика.")
@@ -346,6 +519,10 @@ def plot_curves(
         "p/(gammaD)-s/D",
     }:
         raise ValueError("Режим normalized требует нормированных осей: p–s/D, p/pu–s/D или γD.")
+    if mode == "group_mean_ci" and axis_mode not in {"F-s", "p-s", "p-s/D"}:
+        raise ValueError("Режим group_mean_ci поддерживает только F–s, p–s и p–s/D.")
+    if ci_method not in {"t", "simultaneous"}:
+        raise ValueError("ci_method должен быть t или simultaneous.")
     x, y, xlabel, ylabel, warnings = _axis_spec(frame, axis_mode)
     x = pd.Series(x, index=frame.index, name=getattr(x, "name", None))
     y = pd.Series(y, index=frame.index)
@@ -363,22 +540,33 @@ def plot_curves(
         _configure_antonov_axes(
             ax, xlabel=xlabel, ylabel=ylabel, major_step=major_step, minor_step=minor_step
         )
-        groups = list(dict.fromkeys(frame["group"].astype(str)))
+        groups = sorted(frame["group"].dropna().astype(str).unique().tolist())
         group_style = {name: LINE_STYLES[i % len(LINE_STYLES)] for i, name in enumerate(groups)}
-        tests = list(dict.fromkeys(frame["test_id"].astype(str)))
+        tests = sorted(frame["test_id"].dropna().astype(str).unique().tolist())
         test_marker = {name: MARKERS[i % len(MARKERS)] for i, name in enumerate(tests)}
         curve_map: dict[int, str] = {}
         endpoints: list[tuple[float, float, int]] = []
         all_x: list[float] = []
         all_y: list[float] = []
+        selection_records: list[dict[str, Any]] = []
+        plotted_point_tables: list[pd.DataFrame] = []
 
         if mode in {"raw_protocol", "normalized"}:
-            for number, (test_id, part) in enumerate(frame.groupby("test_id", sort=False), 1):
+            for number, test_id in enumerate(tests, 1):
+                part = frame[frame["test_id"].astype(str) == test_id]
                 group_name = str(part["group"].iloc[0])
-                px = x.loc[part.index]
-                py = y.loc[part.index]
-                valid = px.notna() & py.notna() & ~part.get("is_failure", pd.Series(False, index=part.index)).astype(bool)
-                # Source sequence is preserved: no sorting and no smoothing.
+                points, px, py, valid = _raw_plot_points(
+                    part,
+                    x,
+                    y,
+                    axis_mode=axis_mode,
+                    group=group_name,
+                    test_id=test_id,
+                    curve_number=number,
+                    selection_method="individual_curves",
+                )
+                ordered = _ordered_test_part(part)
+                # Protocol sequence_no is preserved: no sorting by load and no smoothing.
                 line = ax.plot(
                     px[valid].to_numpy(),
                     py[valid].to_numpy(),
@@ -399,10 +587,11 @@ def plot_curves(
                 if len(values_x):
                     endpoints.append((values_x[-1], values_y[-1], number))
                 curve_map[number] = f"{test_id} — {group_name}"
+                plotted_point_tables.append(points)
                 all_x.extend(
                     _draw_failure_event(
                         ax,
-                        part,
+                        ordered,
                         x,
                         label_level=(number - 1) % 3,
                         curve_label=str(number),
@@ -410,16 +599,36 @@ def plot_curves(
                 )
 
         elif mode == "antonov_publication":
+            resolved = resolve_curve_selections(frame, selections)
             number = 0
-            for group_name, group in frame.groupby("group", sort=False):
-                number += 1
-                tests_in_group = group["test_id"].nunique()
-                if tests_in_group >= 2 and axis_mode == "p-s":
-                    mean = group_mean_curve(group, bootstrap=bootstrap, seed=seed)
-                    px = mean["p_kPa"].to_numpy(dtype=float)
-                    py = mean["mean_settlement_mm"].to_numpy(dtype=float)
-                    marker_mask = mean["all_measured"].to_numpy(dtype=bool)
-                    ax.plot(px, py, color="black", linestyle=group_style[str(group_name)], linewidth=1.6)
+            for group_name in groups:
+                group = frame[frame["group"].astype(str) == group_name]
+                decision = resolved[group_name]
+                selection_records.append(asdict(decision))
+                if decision.method in {"mean_curve", "median_curve"}:
+                    number += 1
+                    statistic: Literal["mean", "median"] = (
+                        "mean" if decision.method == "mean_curve" else "median"
+                    )
+                    aggregate = _aggregate_points(
+                        group,
+                        axis_mode=axis_mode,
+                        statistic=statistic,
+                        confidence=confidence,
+                        bootstrap=bootstrap,
+                        seed=seed,
+                    )
+                    px = aggregate["x"].to_numpy(dtype=float)
+                    py = aggregate["y"].to_numpy(dtype=float)
+                    marker_mask = aggregate["draw_marker"].to_numpy(dtype=bool)
+                    line = ax.plot(
+                        px,
+                        py,
+                        color="black",
+                        linestyle=group_style[group_name],
+                        linewidth=1.6,
+                    )[0]
+                    line.set_gid(f"aggregate-{group_name}-{decision.method}")
                     ax.plot(
                         px[marker_mask],
                         py[marker_mask],
@@ -428,54 +637,101 @@ def plot_curves(
                         marker=MARKERS[(number - 1) % len(MARKERS)],
                         markerfacecolor="white",
                         markersize=4.5,
+                    )[0].set_gid(f"aggregate-markers-{group_name}-{decision.method}")
+                    label = "средняя" if statistic == "mean" else "медиана"
+                    tests_in_group = group["test_id"].nunique()
+                    curve_map[number] = f"{group_name}, {label}, n={tests_in_group}"
+                    endpoints.append((float(px[-1]), float(py[-1]), number))
+                    all_x.extend(px.tolist())
+                    all_y.extend(py.tolist())
+                    rendered = aggregate.copy()
+                    rendered["group"] = group_name
+                    rendered["test_id"] = pd.NA
+                    rendered["curve_number"] = number
+                    rendered["selection_method"] = decision.method
+                    rendered["axis_mode"] = axis_mode
+                    plotted_point_tables.append(rendered)
+                    # Failure bounds are never pooled into an aggregate curve.
+                    continue
+
+                test_ids = (
+                    [str(decision.test_id)]
+                    if decision.method == "manual_representative"
+                    else sorted(group["test_id"].dropna().astype(str).unique().tolist())
+                )
+                for test_id in test_ids:
+                    number += 1
+                    part = group[group["test_id"].astype(str) == test_id]
+                    points, px_s, py_s, valid = _raw_plot_points(
+                        part,
+                        x,
+                        y,
+                        axis_mode=axis_mode,
+                        group=group_name,
+                        test_id=test_id,
+                        curve_number=number,
+                        selection_method=decision.method,
                     )
-                    descriptor = f"{group_name}, средняя, n={tests_in_group}"
-                else:
-                    representative_id = str(group["test_id"].iloc[0])
-                    representative = group[group["test_id"].astype(str) == representative_id]
-                    px_s = x.loc[representative.index]
-                    py_s = y.loc[representative.index]
-                    valid = px_s.notna() & py_s.notna() & ~representative.get(
-                        "is_failure", pd.Series(False, index=representative.index)
-                    ).astype(bool)
                     px = px_s[valid].to_numpy(dtype=float)
                     py = py_s[valid].to_numpy(dtype=float)
-                    ax.plot(
+                    line = ax.plot(
                         px,
                         py,
                         color="black",
-                        linestyle=group_style[str(group_name)],
-                        marker=MARKERS[(number - 1) % len(MARKERS)],
+                        linestyle=group_style[group_name],
+                        marker=test_marker[test_id],
                         markerfacecolor="white",
+                        markeredgecolor="black",
                         linewidth=1.4,
                         markersize=4.5,
+                    )[0]
+                    line.set_gid(f"publication-{group_name}-{test_id}")
+                    if len(px):
+                        endpoints.append((float(px[-1]), float(py[-1]), number))
+                    all_x.extend(px.tolist())
+                    all_y.extend(py.tolist())
+                    if decision.method == "manual_representative":
+                        curve_map[number] = f"{group_name}, репрезентативная {test_id}"
+                    else:
+                        curve_map[number] = f"{group_name}, индивидуальная {test_id}"
+                    plotted_point_tables.append(points)
+                    all_x.extend(
+                        _draw_failure_event(
+                            ax,
+                            _ordered_test_part(part),
+                            x,
+                            label_level=(number - 1) % 3,
+                            curve_label=str(number),
+                        )
                     )
-                    descriptor = f"{group_name}, репрезентативная {representative_id}"
-                if len(px):
-                    endpoints.append((float(px[-1]), float(py[-1]), number))
-                all_x.extend(px.tolist())
-                all_y.extend(py.tolist())
-                curve_map[number] = descriptor
-                all_x.extend(
-                    _draw_group_failure_event(
-                        ax,
-                        group,
-                        x,
-                        curve_number=number,
-                        label_level=(number - 1) % 3,
-                    )
-                )
 
         elif mode == "group_mean_ci":
             number = 0
-            for group_name, group in frame.groupby("group", sort=False):
+            for group_name in groups:
+                group = frame[frame["group"].astype(str) == group_name]
                 number += 1
-                for test_id, part in group.groupby("test_id", sort=False):
-                    px = x.loc[part.index]
-                    py = y.loc[part.index]
-                    valid = px.notna() & py.notna() & ~part.get(
-                        "is_failure", pd.Series(False, index=part.index)
-                    ).astype(bool)
+                selection_records.append(
+                    {
+                        **asdict(
+                            CurveSelectionDecision(group=group_name, method="mean_curve")
+                        ),
+                        "source": "group_mean_ci",
+                    }
+                )
+                for test_id in sorted(
+                    group["test_id"].dropna().astype(str).unique().tolist()
+                ):
+                    part = group[group["test_id"].astype(str) == test_id]
+                    _, px, py, valid = _raw_plot_points(
+                        part,
+                        x,
+                        y,
+                        axis_mode=axis_mode,
+                        group=group_name,
+                        test_id=test_id,
+                        curve_number=number,
+                        selection_method="group_mean_ci_source",
+                    )
                     ax.plot(
                         px[valid],
                         py[valid],
@@ -488,23 +744,33 @@ def plot_curves(
                     )
                     all_x.extend(px[valid].astype(float).tolist())
                     all_y.extend(py[valid].astype(float).tolist())
-                if axis_mode != "p-s":
-                    warnings.append("Средняя с ДИ рассчитывается в координатах p–s; выбрана только ломаная повторностей.")
-                    curve_map[number] = str(group_name)
-                    continue
-                mean = group_mean_curve(group, bootstrap=bootstrap, seed=seed)
-                low_name, high_name = (
-                    ("t_ci_low_mm", "t_ci_high_mm")
-                    if ci_method == "t"
-                    else ("simultaneous_low_mm", "simultaneous_high_mm")
+                mean = _aggregate_points(
+                    group,
+                    axis_mode=axis_mode,
+                    statistic="mean",
+                    confidence=confidence,
+                    bootstrap=bootstrap,
+                    seed=seed,
                 )
-                px = mean["p_kPa"].to_numpy(dtype=float)
-                py = mean["mean_settlement_mm"].to_numpy(dtype=float)
+                low_name, high_name = (
+                    ("t_ci_low", "t_ci_high")
+                    if ci_method == "t"
+                    else ("simultaneous_low", "simultaneous_high")
+                )
+                px = mean["x"].to_numpy(dtype=float)
+                py = mean["y"].to_numpy(dtype=float)
                 low = mean[low_name].to_numpy(dtype=float)
                 high = mean[high_name].to_numpy(dtype=float)
                 ax.fill_between(px, low, high, color="black", alpha=0.10, linewidth=0)
-                ax.plot(px, py, color="black", linestyle=group_style[str(group_name)], linewidth=1.7)
-                marker_mask = mean["all_measured"].to_numpy(dtype=bool)
+                line = ax.plot(
+                    px,
+                    py,
+                    color="black",
+                    linestyle=group_style[group_name],
+                    linewidth=1.7,
+                )[0]
+                line.set_gid(f"group-mean-{group_name}")
+                marker_mask = mean["draw_marker"].to_numpy(dtype=bool)
                 ax.plot(
                     px[marker_mask],
                     py[marker_mask],
@@ -513,23 +779,29 @@ def plot_curves(
                     color="black",
                     markerfacecolor="white",
                     markersize=4.3,
-                )
-                for p_value, s_value, count in zip(px, py, mean["n"], strict=True):
-                    ax.annotate(f"n={count}", (p_value, s_value), xytext=(0, 5), textcoords="offset points", fontsize=6.5, ha="center")
+                )[0].set_gid(f"group-mean-markers-{group_name}")
+                for x_value, y_value, count in zip(px, py, mean["n"], strict=True):
+                    ax.annotate(
+                        f"n={count}",
+                        (x_value, y_value),
+                        xytext=(0, 5),
+                        textcoords="offset points",
+                        fontsize=6.5,
+                        ha="center",
+                    )
                 all_x.extend(px.tolist())
                 all_y.extend(np.concatenate([py, low[np.isfinite(low)], high[np.isfinite(high)]]).tolist())
                 if len(px):
                     endpoints.append((float(px[-1]), float(py[-1]), number))
                 curve_map[number] = f"{group_name}, средняя и 95% ДИ, n={group['test_id'].nunique()}"
-                all_x.extend(
-                    _draw_group_failure_event(
-                        ax,
-                        group,
-                        x,
-                        curve_number=number,
-                        label_level=(number - 1) % 3,
-                    )
-                )
+                rendered = mean.copy()
+                rendered["group"] = group_name
+                rendered["test_id"] = pd.NA
+                rendered["curve_number"] = number
+                rendered["selection_method"] = "mean_curve"
+                rendered["axis_mode"] = axis_mode
+                plotted_point_tables.append(rendered)
+                # Failure and censoring are shown only in the individual interval plot.
 
         _reasonable_limits(ax, all_x, all_y, fixed_axes=fixed_axes)
         y_limits = ax.get_ylim()
@@ -537,9 +809,274 @@ def plot_curves(
         caption = "Кривые нагрузки–осадки. " + "; ".join(
             f"{number} — {description}" for number, description in curve_map.items()
         )
-        caption += ". Точки — измерения; линии между ними — ломаные без spline-сглаживания."
+        caption += (
+            ". Маркеры — уровни без интерполированных вкладов; "
+            "линии между точками — ломаные без spline-сглаживания."
+        )
         fig.canvas.draw()
-        return PlotOutput(fig, caption, warnings, curve_map)
+        plotted_points = (
+            pd.concat(plotted_point_tables, ignore_index=True, sort=False)
+            if plotted_point_tables
+            else pd.DataFrame()
+        )
+        return PlotOutput(
+            fig,
+            caption,
+            warnings,
+            curve_map,
+            selection_records=selection_records,
+            plotted_points=plotted_points,
+        )
+
+
+def _finite_number(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
+def _row_bool(row: pd.Series, *names: str) -> bool:
+    for name in names:
+        if name not in row:
+            continue
+        value = row.get(name)
+        if value is None or bool(pd.isna(value)):
+            continue
+        return bool(value)
+    return False
+
+
+def _failure_bounds(
+    row: pd.Series,
+    capacity_axis: Literal["force", "pressure"],
+) -> tuple[float | None, float | None]:
+    if capacity_axis == "force":
+        lower = _finite_number(row.get("Fu_lower"))
+        upper = _finite_number(row.get("Fu_upper"))
+    else:
+        lower = _finite_number(row.get("pu_lower"))
+        upper = _finite_number(row.get("pu_upper"))
+    row_axis = str(row.get("capacity_axis") or row.get("capacity_kind") or "").strip().lower()
+    if lower is None and (not row_axis or row_axis == capacity_axis):
+        lower = _finite_number(row.get("lower_bound"))
+    if upper is None and (not row_axis or row_axis == capacity_axis):
+        upper = _finite_number(row.get("upper_bound"))
+    return lower, upper
+
+
+def plot_failure_intervals(
+    failure_table: pd.DataFrame,
+    *,
+    capacity_axis: Literal["force", "pressure"] = "force",
+) -> PlotOutput:
+    """Plot individual capacity intervals without a pooled point estimate."""
+
+    if capacity_axis not in {"force", "pressure"}:
+        raise ValueError("capacity_axis должен быть force или pressure.")
+    if failure_table.empty:
+        raise ValueError("Нет данных о разрушении и цензурировании.")
+    if "test_id" not in failure_table:
+        raise ValueError("В таблице разрушения отсутствует test_id.")
+    ordered = failure_table.copy()
+    ordered["test_id"] = ordered["test_id"].astype(str)
+    if ordered["test_id"].duplicated().any():
+        duplicates = sorted(ordered.loc[ordered["test_id"].duplicated(), "test_id"].unique())
+        raise ValueError(f"В таблице разрушения повторяются test_id: {', '.join(duplicates)}.")
+    ordered = ordered.sort_values("test_id", kind="stable").reset_index(drop=True)
+
+    records: list[dict[str, Any]] = []
+    all_bounds: list[float] = []
+    for _, row in ordered.iterrows():
+        lower, upper = _failure_bounds(row, capacity_axis)
+        observed = _row_bool(
+            row,
+            "failure_observed",
+            "observed_failure",
+            "failure_reached",
+        )
+        right_censored = _row_bool(row, "right_censored")
+        explicit_type = str(row.get("censoring_type") or "").strip().lower()
+        if explicit_type in {"right", "right_censored"}:
+            right_censored = True
+        interval_censored = lower is not None and upper is not None and (
+            _row_bool(row, "interval_censored") or (observed and lower < upper)
+        )
+        if right_censored:
+            censoring_type = "right_censored"
+        elif interval_censored:
+            censoring_type = "interval_censored"
+        elif observed and upper is not None and lower == upper:
+            censoring_type = "observed_exact"
+        else:
+            censoring_type = "indeterminate"
+        records.append(
+            {
+                "test_id": str(row["test_id"]),
+                "capacity_axis": capacity_axis,
+                "lower_bound": lower,
+                "upper_bound": upper,
+                "failure_observed": observed,
+                "observed_failure": observed,
+                "interval_censored": interval_censored,
+                "right_censored": right_censored,
+                "censoring_type": censoring_type,
+            }
+        )
+        all_bounds.extend(value for value in (lower, upper) if value is not None)
+
+    finite_bounds = np.asarray(all_bounds, dtype=float)
+    if len(finite_bounds):
+        data_min = float(finite_bounds.min())
+        data_max = float(finite_bounds.max())
+        data_span = max(data_max - data_min, abs(data_max) * 0.05, 1.0)
+    else:
+        data_min, data_max, data_span = 0.0, 1.0, 1.0
+    arrow_length = max(data_span * 0.16, 1e-9)
+
+    warnings: list[str] = []
+    with mpl.rc_context(
+        {
+            "font.family": "DejaVu Sans",
+            "font.size": 9,
+            "axes.linewidth": 0.9,
+            "savefig.bbox": "tight",
+            "svg.fonttype": "none",
+        }
+    ):
+        fig, ax = plt.subplots(figsize=(7.2, 4.2), constrained_layout=True)
+        ax.xaxis.set_label_position("top")
+        ax.xaxis.tick_top()
+        ax.tick_params(axis="x", which="both", top=True, bottom=False, labeltop=True, labelbottom=False)
+        ax.set_xlabel("Fu, кН" if capacity_axis == "force" else "pu, кПа")
+        y_positions = np.arange(len(records), dtype=float)
+        ax.set_yticks(y_positions, [record["test_id"] for record in records])
+        ax.set_ylabel("test ID")
+        ax.set_ylim(len(records) - 0.35, -0.65)
+        ax.grid(True, axis="x", which="major", color="0.72", linewidth=0.5)
+        ax.xaxis.set_minor_locator(AutoMinorLocator(2))
+        ax.grid(True, axis="x", which="minor", color="0.88", linewidth=0.35)
+        ax.set_axisbelow(True)
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_color("black")
+            spine.set_linewidth(0.9)
+
+        arrow_ends: list[float] = []
+        for y_position, record in zip(y_positions, records, strict=True):
+            test_id = record["test_id"]
+            lower = record["lower_bound"]
+            upper = record["upper_bound"]
+            kind = record["censoring_type"]
+            if kind == "interval_censored" and lower is not None and upper is not None:
+                interval = ax.plot(
+                    [lower, upper],
+                    [y_position, y_position],
+                    color="black",
+                    linewidth=1.2,
+                )[0]
+                interval.set_gid(f"failure-interval-{test_id}")
+                lower_artist = ax.plot(
+                    lower,
+                    y_position,
+                    marker="o",
+                    markerfacecolor="white",
+                    markeredgecolor="black",
+                    linestyle="none",
+                    markersize=5.2,
+                )[0]
+                lower_artist.set_gid(f"failure-open-lower-{test_id}")
+                upper_artist = ax.plot(
+                    upper,
+                    y_position,
+                    marker="o",
+                    markerfacecolor="black",
+                    markeredgecolor="black",
+                    linestyle="none",
+                    markersize=5.2,
+                )[0]
+                upper_artist.set_gid(f"failure-closed-upper-{test_id}")
+            elif kind == "right_censored" and lower is not None:
+                arrow_end = lower + arrow_length
+                arrow_ends.append(arrow_end)
+                lower_artist = ax.plot(
+                    lower,
+                    y_position,
+                    marker="o",
+                    markerfacecolor="white",
+                    markeredgecolor="black",
+                    linestyle="none",
+                    markersize=4.8,
+                )[0]
+                lower_artist.set_gid(f"failure-right-lower-{test_id}")
+                annotation = ax.annotate(
+                    "",
+                    xy=(arrow_end, y_position),
+                    xytext=(lower, y_position),
+                    arrowprops={"arrowstyle": "-|>", "color": "black", "lw": 1.1},
+                )
+                annotation.set_gid(f"failure-right-arrow-{test_id}")
+            elif kind == "observed_exact" and upper is not None:
+                exact = ax.plot(
+                    upper,
+                    y_position,
+                    marker="o",
+                    markerfacecolor="black",
+                    markeredgecolor="black",
+                    linestyle="none",
+                    markersize=5.2,
+                )[0]
+                exact.set_gid(f"failure-observed-{test_id}")
+            else:
+                warnings.append(
+                    f"{test_id}: недостаточно границ для отображения интервала {capacity_axis}."
+                )
+                marker_x = lower if lower is not None else upper
+                if marker_x is not None:
+                    indeterminate = ax.plot(
+                        marker_x,
+                        y_position,
+                        marker="x",
+                        color="black",
+                        linestyle="none",
+                        markersize=5.5,
+                    )[0]
+                    indeterminate.set_gid(f"failure-indeterminate-{test_id}")
+                else:
+                    missing_text = ax.text(
+                        0.01,
+                        y_position,
+                        "нет границ",
+                        transform=ax.get_yaxis_transform(),
+                        ha="left",
+                        va="center",
+                        fontsize=8,
+                        color="black",
+                    )
+                    missing_text.set_gid(f"failure-indeterminate-{test_id}")
+
+        xmin = min(0.0, data_min)
+        xmax_data = max([data_max, *arrow_ends]) if arrow_ends else data_max
+        span = max(xmax_data - xmin, 1.0)
+        ax.set_xlim(xmin, xmax_data + 0.08 * span)
+        observed_n = sum(bool(record["failure_observed"]) for record in records)
+        interval_n = sum(bool(record["interval_censored"]) for record in records)
+        right_n = sum(bool(record["right_censored"]) for record in records)
+        caption = (
+            "Индивидуальные интервалы предельной нагрузки: "
+            f"наблюдалось разрушение — {observed_n}; интервально цензурировано — {interval_n}; "
+            f"правоцензурировано — {right_n}. Сводная точечная оценка не рассчитывалась."
+        )
+        fig.canvas.draw()
+        curve_map = {index + 1: record["test_id"] for index, record in enumerate(records)}
+        return PlotOutput(
+            fig,
+            caption,
+            warnings,
+            curve_map,
+            plotted_points=pd.DataFrame(records),
+        )
 
 
 def plot_pcr_diagnostic(
@@ -552,7 +1089,12 @@ def plot_pcr_diagnostic(
     bootstrap: int = 500,
     seed: int = 202604,
 ) -> PlotOutput:
-    selected_test = str(frame["test_id"].iloc[0])
+    test_ids = sorted(frame["test_id"].dropna().astype(str).unique().tolist())
+    if len(test_ids) != 1:
+        raise ValueError(
+            "Диагностика pcr требует ровно одно явно отфильтрованное испытание."
+        )
+    selected_test = test_ids[0]
     part = frame[frame["test_id"].astype(str) == selected_test]
     result = result or fit_segmented_pcr(part, bootstrap=bootstrap, seed=seed)
     used = part.loc[result.used_indices].sort_values("p_kPa", kind="stable")
