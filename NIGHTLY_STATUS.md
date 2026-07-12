@@ -15,6 +15,8 @@
 - Phase 03 remote head: `148622d1c171dbd404ac5ef572cae6b13afb451d`
 - Phase 04 local code head: `420e5f02334a1b747e74c4cf6857ab308aceda7e`
 - Phase 04 remote code head: `47488d68d12179dac5b085229b0c2031a248b10c`
+- Phase 05 local code head: `fee902cc082cb07e4a0ed1f1e6c93a0186a3ac7b`
+- Phase 05 remote code head: pending GitHub integration upload
 
 ## Phase status
 
@@ -25,7 +27,7 @@
 | 02 Pairing | COMPLETE | local `3a8a545`; remote `62326f5` | 233 tests; core coverage 81.73%; CLI demo verified | [run 29186501814](https://github.com/an89537171644/geo_graf/actions/runs/29186501814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | `pair_id` is explicit; invalid, incomplete or ambiguous pairing falls back to independent analysis with a visible reason |
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
 | 04 Plots/censoring | COMPLETE | local `420e5f0`; remote `47488d6` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | [run 29191539241](https://github.com/an89537171644/geo_graf/actions/runs/29191539241): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
-| 05 Stretch | NOT STARTED | — | — | — | Not permitted before phases 0–4 |
+| 05 Stretch / reporting A | LOCAL COMPLETE / CI PENDING | local `fee902c`; remote pending | 387 tests; core 130 tests / 84.57%; Ruff/compile/pip check PASS; CLI demo and hardened semantic verifier PASS | Pending upload | Deterministic HTML/XLSX approval package, exact source bytes, formula-safe cells, explicit review registry and self-contained `approval/` archive tree; SQLite Priority B not started |
 
 ## Numerical changes
 
@@ -91,6 +93,23 @@ drawn separately; no arithmetic pooling is present and `summary_method=none` lea
 `point_estimate=null`. The final local demo bundle
 `work/phase04-publication-demo-final/reproducibility.zip` passed the semantic verifier
 with SHA-256 `E98BD0CFBEF51C16AD3912B64E58F3D6BAD2E10982515020D3079EBD8201051F`.
+
+Phase 05 Priority A changes reporting and archive representation only. It does not
+change Antonov curves, failure/censoring classification, pcr, moduli or group
+comparison calculations. The CLI and Streamlit interface now call one approval
+package builder after the final figure bytes exist. It emits `report.html`,
+`report.xlsx`, `artifact_manifest.json` and `approval_report.zip`; the same exact
+bytes and their linked artifact tree are embedded under `approval/` in
+`reproducibility.zip`.
+
+The exact uploaded protocol and metadata bytes are authoritative. Raw-data sheets
+are explicitly labelled as review views. XLSX keeps a numeric convenience cell plus
+an exact textual machine representation, records non-finite states visibly and never
+creates executable formula cells from user input. Relative links, OOXML relationships
+and ZIP members are restricted to safe package paths; file/directory collisions and
+encoded traversal are rejected. The final local demo
+`work/phase05-reporting-demo-final/approval_report.zip` passed the semantic verifier
+with SHA-256 `2DAE243C6674C9E31673B757B78C1511065E5B8DD96D966BCB7716B13BCB849B`.
 
 ## Remaining blockers
 
