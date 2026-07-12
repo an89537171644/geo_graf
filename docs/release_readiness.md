@@ -49,7 +49,7 @@
 | Version consistency | PASS — package/runtime/provenance `0.5.0rc1` |
 | Dependency health | PASS — `pip check` без ошибок |
 | Static checks | PASS — Ruff; `compileall` также включает каталог `acceptance` |
-| Full tests | PASS — 414 tests |
+| Full tests | PASS — 415 tests |
 | Core coverage | PASS — 130 tests, 84.57% |
 | Application | PASS — 8 Streamlit AppTest tests внутри full pytest |
 | Production demo | PASS — создан полный `reproducibility.zip` |

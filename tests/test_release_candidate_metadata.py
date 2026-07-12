@@ -72,3 +72,8 @@ def test_missing_license_is_an_explicit_unsigned_gate() -> None:
         encoding="utf-8"
     )
     assert "approved_for_distribution: false" in decision
+
+
+def test_acceptance_inputs_are_checked_out_with_portable_lf_bytes() -> None:
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "acceptance/** text eol=lf" in attributes.splitlines()

@@ -44,7 +44,7 @@ TASK 06 выполняется только в ветке `release/0.5.0rc1`; р
 - package metadata, runtime и provenance: `0.5.0rc1`; `pip check`: PASS;
 - Ruff: PASS; `compileall` для `app.py`, `soilstamp`, `tests`, `scripts` и
   acceptance-only XLSX materializer: PASS;
-- полный pytest: **414 passed**; включённый Streamlit AppTest: **8 passed**;
+- полный pytest: **415 passed**; включённый Streamlit AppTest: **8 passed**;
 - calculation-core: **130 passed**, coverage **84.57%** при gate 80%;
 - CLI demo: PASS; semantic verifier: PASS; SHA-256 `reproducibility.zip`:
   `0405eb6fc1b1f00fd5a90bce420bded45d8d4c5b25a7c4173a34550078bebbe9`;

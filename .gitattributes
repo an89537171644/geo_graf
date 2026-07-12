@@ -1,0 +1,2 @@
+# Acceptance input SHA-256 values are defined over repository LF bytes on every OS.
+acceptance/** text eol=lf
