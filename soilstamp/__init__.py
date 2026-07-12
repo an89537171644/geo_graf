@@ -1,12 +1,23 @@
 """Soil Stamp Antonov — reproducible plate-load test analysis."""
 
 from .analysis import (
+    calculate_moduli_for_test,
     compare_groups,
     deformation_work,
     estimate_moduli,
     fit_segmented_pcr,
     group_mean_curve,
     hysteresis_metrics,
+)
+from .methodology import (
+    ModulusMethodProfile,
+    ModulusOverrides,
+    ModulusResolution,
+    get_modulus_profile,
+    modulus_profile_definitions,
+    modulus_profile_ids,
+    parse_pressure_range,
+    resolve_modulus_method,
 )
 from .data import (
     AuditTrail,
@@ -58,6 +69,7 @@ __all__ = [
     "AuditTrail",
     "apply_settlement_correction",
     "classify_branches",
+    "calculate_moduli_for_test",
     "compare_groups",
     "CorrectionRecord",
     "deformation_work",
@@ -76,6 +88,9 @@ __all__ = [
     "ManualPoint",
     "ManualReinforcement",
     "ManualValidationResult",
+    "ModulusMethodProfile",
+    "ModulusOverrides",
+    "ModulusResolution",
     "failure_summary",
     "fit_segmented_pcr",
     "group_mean_curve",
@@ -83,7 +98,10 @@ __all__ = [
     "indicator_audit_frame",
     "indicator_event_frame",
     "indicator_passport_frame",
+    "get_modulus_profile",
     "MeasuredPoint",
+    "modulus_profile_definitions",
+    "modulus_profile_ids",
     "ProcessingConfig",
     "Project",
     "ProvenanceRecord",
@@ -94,10 +112,12 @@ __all__ = [
     "parse_decimal",
     "passport_completeness",
     "prepare_measurements",
+    "parse_pressure_range",
     "process_indicator_frame",
     "read_protocol",
     "read_protocol_excel",
     "resolve_indicator_passport",
+    "resolve_modulus_method",
     "validate_measurements",
     "validate_manual_draft",
 ]

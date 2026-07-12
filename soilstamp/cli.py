@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
 
-from .analysis import estimate_moduli, fit_segmented_pcr
+from .analysis import calculate_moduli_for_test, fit_segmented_pcr
 from .data import AuditTrail, apply_settlement_correction, failure_summary, prepare_measurements
 from .indicators import (
     indicator_audit_frame,
@@ -16,6 +17,12 @@ from .indicators import (
     indicator_passport_frame,
 )
 from .io import read_metadata_json, read_protocol, validate_import_metadata_consistency
+from .methodology import (
+    ModulusOverrides,
+    modulus_profile_definitions,
+    modulus_profile_ids,
+    parse_pressure_range,
+)
 from .plotting import export_figure, plot_curves
 from .provenance import (
     build_provenance,
@@ -60,6 +67,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--bootstrap", type=int, default=500)
     parser.add_argument("--seed", type=int, default=202604)
+    parser.add_argument(
+        "--method-profile",
+        choices=modulus_profile_ids(),
+        help="Версионированный профиль расчёта условного E_stamp_app",
+    )
+    parser.add_argument(
+        "--e-range",
+        type=parse_pressure_range,
+        metavar="P_MIN:P_MAX",
+        help="Явный замкнутый диапазон давления для E, кПа",
+    )
+    parser.add_argument(
+        "--e-range-source",
+        choices=["explicit", "accepted_pcr", "project_profile"],
+        help="Методический источник диапазона E",
+    )
+    parser.add_argument("--e-range-author", help="Автор подтверждения диапазона E")
+    parser.add_argument("--e-range-reason", help="Обоснование подтверждения диапазона E")
     parser.add_argument("--test-id", help="Испытание для режима diagnostic")
     parser.add_argument(
         "--import-mode",
@@ -74,6 +99,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> Path:
+    e_range = getattr(args, "e_range", None)
+    e_range_source = getattr(args, "e_range_source", None)
+    if e_range is not None and e_range_source is None:
+        e_range_source = "explicit"
+    if e_range_source == "explicit" and e_range is None:
+        raise ValueError("Для --e-range-source explicit требуется --e-range P_MIN:P_MAX.")
+    range_author = str(getattr(args, "e_range_author", None) or "").strip() or None
+    range_reason = str(getattr(args, "e_range_reason", None) or "").strip() or None
+    range_approved_at = (
+        datetime.now(timezone.utc).isoformat() if range_author and range_reason else None
+    )
+    modulus_overrides = ModulusOverrides(
+        profile_id=getattr(args, "method_profile", None),
+        p_range_kpa=e_range,
+        p_range_source=e_range_source,
+        approval_status="approved" if range_approved_at else None,
+        author=range_author,
+        timestamp_utc=range_approved_at,
+        reason=range_reason,
+    )
     protocol_bytes = args.protocol.read_bytes()
     metadata_bytes = args.metadata.read_bytes()
     column_mapping = None
@@ -171,9 +216,39 @@ def run(args: argparse.Namespace) -> Path:
                 ValidationIssue("warning", "pcr_not_calculated", str(exc), test_id=str(test_id))
             )
         try:
-            table = estimate_moduli(part, bootstrap=args.bootstrap, seed=args.seed)
+            table = calculate_moduli_for_test(
+                part,
+                metadata,
+                str(test_id),
+                overrides=modulus_overrides,
+                pcr_result=pcr_results.get(str(test_id)),
+                bootstrap=args.bootstrap,
+                seed=args.seed,
+            )
             table.insert(0, "test_id", str(test_id))
             modulus_tables.append(table)
+            resolved = table.attrs.get("modulus_resolution", {})
+            audit.record(
+                "resolve_modulus_method",
+                scope=str(test_id),
+                reason=range_reason or "Разрешение методического контракта CLI",
+                parameters=resolved,
+                user=range_author or "cli",
+                method="methodology_resolver",
+            )
+            if resolved.get("review_status") == "review_required":
+                message = str(resolved.get("methodology_note") or "Требуется проверка методики E.")
+                analysis_warnings.append(
+                    {"test_id": str(test_id), "analysis": "E_methodology", "message": message}
+                )
+                issues.append(
+                    ValidationIssue(
+                        "warning",
+                        "modulus_review_required",
+                        message,
+                        test_id=str(test_id),
+                    )
+                )
         except ValueError as exc:
             analysis_warnings.append(
                 {"test_id": str(test_id), "analysis": "E", "message": str(exc)}
@@ -257,6 +332,10 @@ def run(args: argparse.Namespace) -> Path:
         json.dumps({key: value.to_dict() for key, value in pcr_results.items()}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    (args.out / "modulus_method_profiles.json").write_text(
+        json.dumps(modulus_profile_definitions(), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     (args.out / "report_ru.md").write_text(report, encoding="utf-8")
     figures = {
         "antonov.svg": export_figure(plot.figure, "svg"),
@@ -276,6 +355,7 @@ def run(args: argparse.Namespace) -> Path:
             "moduli": moduli,
             "pcr": {key: value.to_dict() for key, value in pcr_results.items()},
             "analysis_warnings": analysis_warnings,
+            "modulus_method_profiles": modulus_profile_definitions(),
             "conversion_parameters": pd.DataFrame(
                 effective_conversion_parameters(
                     metadata,

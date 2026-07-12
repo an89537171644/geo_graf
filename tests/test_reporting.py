@@ -194,3 +194,106 @@ def test_report_summarizes_indicator_passport_crossings_and_qc() -> None:
     assert "переходов через ноль — 1" in report
     assert "точек обратного хода — 1" in report
     assert "ok=1, warning=1" in report
+
+
+def test_report_marks_primary_modulus_and_shows_method_provenance() -> None:
+    metadata = {"stamp_area_m2": 0.1, "indicator_resolution_mm": 0.01}
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1", "T1", "T1"],
+            "stage": [1, 2, 3],
+            "load": [1.0, 2.0, 3.0],
+            "settlement": [0.0, 0.2, 0.5],
+        }
+    )
+    prepared, issues = prepare_measurements(raw, metadata)
+    moduli = pd.DataFrame(
+        [
+            {
+                "test_id": "T1",
+                "method": "E_regression",
+                "E_stamp_app_kPa": 12543.0,
+                "p_min_kPa": 10.0,
+                "p_max_kPa": 80.0,
+                "n": 3,
+                "nu": 0.3,
+                "shape_factor": 0.8,
+                "ci_low_kPa": 12000.0,
+                "ci_high_kPa": 13000.0,
+                "profile_id": "antonov_round_stamp_v1",
+                "profile_version": "1",
+                "profile_source": "metadata.tests.T1",
+                "is_primary": True,
+                "review_status": "approved",
+                "p_range_source": "explicit",
+                "p_range_origin": "manual_confirmation",
+                "requested_p_min_kPa": 10.0,
+                "requested_p_max_kPa": 80.0,
+                "nu_source": "method_profile",
+                "shape_factor_source": "method_profile",
+                "used_indices": "[0, 1, 2]",
+                "methodology_note": "Диапазон подтверждён инженером.",
+            }
+        ]
+    )
+
+    report = build_markdown_report(
+        metadata=metadata,
+        prepared=prepared,
+        validation_issues=issues,
+        failures=failure_summary(prepared),
+        moduli=moduli,
+        audit=AuditTrail(),
+    )
+
+    assert "`T1` / `E_regression` / `antonov_round_stamp_v1@1`" in report
+    assert "**PRIMARY**; review_status=`approved`" in report
+    assert "12,5 МПа; 95% ДИ 12,0–13,0 МПа" in report
+    assert "источник диапазона=`explicit` (origin=`manual_confirmation`)" in report
+    assert "ν=0,30 (source=`method_profile`)" in report
+    assert "использованные строки=[0, 1, 2]" in report
+    assert "запрошенный диапазон: 10,0–80,0 кПа" in report
+    assert "Диапазон подтверждён инженером." in report
+
+
+def test_report_treats_legacy_and_review_required_moduli_as_diagnostic() -> None:
+    metadata = {"stamp_area_m2": 0.1, "indicator_resolution_mm": 0.01}
+    raw = pd.DataFrame(
+        {
+            "test_id": ["T1", "T1"],
+            "stage": [1, 2],
+            "load": [1.0, 2.0],
+            "settlement": [0.0, 0.2],
+        }
+    )
+    prepared, issues = prepare_measurements(raw, metadata)
+    legacy_moduli = pd.DataFrame(
+        [
+            {
+                "test_id": "T1",
+                "method": "E_regression",
+                "E_stamp_app_kPa": 12500.0,
+                "p_min_kPa": 10.0,
+                "p_max_kPa": 80.0,
+                "n": 2,
+                "nu": 0.3,
+                "shape_factor": 1.0,
+                "is_primary": True,
+                "review_status": "review_required",
+            }
+        ]
+    )
+
+    report = build_markdown_report(
+        metadata=metadata,
+        prepared=prepared,
+        validation_issues=issues,
+        failures=failure_summary(prepared),
+        moduli=legacy_moduli,
+        audit=AuditTrail(),
+    )
+
+    modulus_line = next(line for line in report.splitlines() if "E_regression" in line)
+    assert "diagnostic_unapproved_v1@legacy" in modulus_line
+    assert "**DIAGNOSTIC**; review_status=`review_required`" in modulus_line
+    assert "**PRIMARY**" not in modulus_line

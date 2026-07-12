@@ -46,7 +46,11 @@ def _artifact_payloads() -> dict[str, bytes]:
             indent=2,
         ).encode(),
         "moduli.csv": (
-            "test_id,method,E_stamp_app_kPa\nDEMO-01,E_regression,12500.0\n"
+            "test_id,method,E_stamp_app_kPa,profile_id,profile_version,is_primary,"
+            "review_status,p_range_source,nu_source,shape_factor_source,used_indices,"
+            "methodology_note\n"
+            "DEMO-01,E_regression,12500.0,antonov_round_stamp_v1,1,True,approved,"
+            'explicit,profile,profile,"[0, 1, 2]",engineer-confirmed range\n'
         ).encode(),
         "report_ru.md": "# Демонстрационный отчёт\n\nРезультат воспроизводим.\n".encode(
             "utf-8"
@@ -60,10 +64,12 @@ def _artifact_payloads() -> dict[str, bytes]:
 def _write_demo_artifacts(
     directory: Path,
     *,
+    artifact_overrides: dict[str, bytes] | None = None,
     zip_overrides: dict[str, bytes] | None = None,
     bad_manifest_hash_for: str | None = None,
 ) -> None:
     payloads = _artifact_payloads()
+    payloads.update(artifact_overrides or {})
     for name, payload in payloads.items():
         (directory / name).write_bytes(payload)
 
@@ -134,6 +140,65 @@ def test_verify_demo_artifacts_checks_zip_manifest_and_external_copies(tmp_path:
 
     assert f"manifest SHA-256 mismatch for {member}" in str(caught.value)
     assert f"member {member} differs from failure_summary.csv" in str(caught.value)
+
+
+def test_verify_demo_artifacts_requires_modulus_method_contract(tmp_path: Path) -> None:
+    legacy_moduli = (
+        "test_id,method,E_stamp_app_kPa\nDEMO-01,E_regression,12500.0\n"
+    ).encode()
+    _write_demo_artifacts(
+        tmp_path,
+        artifact_overrides={"moduli.csv": legacy_moduli},
+    )
+
+    with pytest.raises(ArtifactVerificationError) as caught:
+        verify_demo_artifacts(tmp_path)
+
+    message = str(caught.value)
+    assert "moduli.csv is missing columns:" in message
+    assert "profile_id" in message
+    assert "used_indices" in message
+
+
+def test_verify_demo_artifacts_rejects_invalid_primary_modulus(tmp_path: Path) -> None:
+    invalid_moduli = (
+        "test_id,method,E_stamp_app_kPa,profile_id,profile_version,is_primary,"
+        "review_status,p_range_source,nu_source,shape_factor_source,used_indices,"
+        "methodology_note\n"
+        "DEMO-01,E_regression,12500.0,diagnostic_unapproved_v1,1,True,"
+        "review_required,diagnostic_full_curve,profile,profile,not-a-list,diagnostic\n"
+    ).encode()
+    _write_demo_artifacts(
+        tmp_path,
+        artifact_overrides={"moduli.csv": invalid_moduli},
+    )
+
+    with pytest.raises(ArtifactVerificationError) as caught:
+        verify_demo_artifacts(tmp_path)
+
+    message = str(caught.value)
+    assert "used_indices is not a list" in message
+    assert "review_status is not approved" in message
+    assert "primary with an unapproved profile" in message
+    assert "primary with a diagnostic pressure range" in message
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "0", "-1"])
+def test_verify_demo_artifacts_rejects_nonpositive_or_nonfinite_primary_e(
+    tmp_path: Path, value: str
+) -> None:
+    invalid_moduli = _artifact_payloads()["moduli.csv"].replace(
+        b"12500.0", value.encode()
+    )
+    _write_demo_artifacts(
+        tmp_path,
+        artifact_overrides={"moduli.csv": invalid_moduli},
+    )
+
+    with pytest.raises(ArtifactVerificationError) as caught:
+        verify_demo_artifacts(tmp_path)
+
+    assert "primary without a finite positive E_stamp_app_kPa" in str(caught.value)
 
 
 def test_verify_demo_artifacts_script_is_cross_platform_cli(tmp_path: Path) -> None:

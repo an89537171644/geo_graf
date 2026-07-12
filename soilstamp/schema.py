@@ -321,6 +321,8 @@ class PCRResult:
     bootstrap_valid: int
     pcr_manual: float | None = None
     manual_reason: str | None = None
+    manual_author: str | None = None
+    manual_confirmed_at_utc: str | None = None
     alternative: dict[str, Any] | None = None
 
     @property
@@ -346,6 +348,19 @@ class ModulusResult:
     nu: float
     shape_factor: float
     slope_m_per_kPa: float | None
+    profile_id: str = "diagnostic_unapproved_v1"
+    profile_version: str = "1.0"
+    is_primary: bool = False
+    review_status: str = "review_required"
+    p_range_source: str = "diagnostic_full_curve"
+    nu_source: str = "legacy_default"
+    shape_factor_source: str = "legacy_default"
+    used_indices: list[int] = field(default_factory=list)
+    methodology_note: str = ""
+    profile_source: str = "legacy_default"
+    p_range_origin: str = "observed_data"
+    requested_p_min_kPa: float | None = None
+    requested_p_max_kPa: float | None = None
     note: str = ""
 
     def to_dict(self) -> dict[str, Any]:

@@ -79,6 +79,71 @@ def software_versions() -> dict[str, str]:
     }
 
 
+def _modulus_text(value: Any, fallback: str = "—") -> str:
+    """Render a methodology field without exposing pandas missing values."""
+
+    if value is None:
+        return fallback
+    try:
+        if pandas.isna(value):
+            return fallback
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip()
+    return text or fallback
+
+
+def _modulus_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value) if math.isfinite(float(value)) else False
+    return str(value).strip().casefold() in {"1", "true", "yes", "да"}
+
+
+def _finite_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
+def _modulus_resolution_mpa(row: pandas.Series) -> float:
+    """Choose MPa rounding from the reported confidence interval.
+
+    The uncertainty is shown with one significant digit, or two when its
+    leading digit is one or two.  The same decimal place is then used for the
+    estimate and both confidence limits.
+    """
+
+    estimate = _finite_float(row.get("E_stamp_app_kPa"))
+    low = _finite_float(row.get("ci_low_kPa"))
+    high = _finite_float(row.get("ci_high_kPa"))
+    if estimate is None or low is None or high is None:
+        return 0.01
+    uncertainty = max(abs(estimate - low), abs(high - estimate)) / 1000.0
+    if not math.isfinite(uncertainty) or uncertainty <= 0:
+        return 0.01
+    exponent = math.floor(math.log10(uncertainty))
+    leading = uncertainty / (10**exponent)
+    significant_digits = 2 if leading < 3 else 1
+    return float(10 ** (exponent - significant_digits + 1))
+
+
+def _modulus_used_rows(value: Any) -> str:
+    if isinstance(value, (list, tuple)):
+        return json.dumps(list(value), ensure_ascii=False)
+    text = _modulus_text(value)
+    return text if text != "—" else "не указаны"
+
+
+def _modulus_profile(row: pandas.Series) -> str:
+    profile_id = _modulus_text(row.get("profile_id"), "diagnostic_unapproved_v1")
+    profile_version = _modulus_text(row.get("profile_version"), "legacy")
+    return f"{profile_id}@{profile_version}"
+
+
 def _indicator_tables_for_scope(
     prepared,
     test_ids: list[str] | None = None,
@@ -338,13 +403,50 @@ def build_markdown_report(
     if moduli is not None and len(moduli):
         lines.extend(["", "## Условный штамповый модуль", ""])
         for _, row in moduli[moduli["method"].isin(["E_regression", "E_secant"])].iterrows():
+            review_status = _modulus_text(row.get("review_status"), "review_required")
+            primary = _modulus_bool(row.get("is_primary")) and review_status == "approved"
+            result_class = "PRIMARY" if primary else "DIAGNOSTIC"
+            resolution_mpa = _modulus_resolution_mpa(row)
+            estimate_kpa = _finite_float(row.get("E_stamp_app_kPa"))
+            estimate_mpa = estimate_kpa / 1000.0 if estimate_kpa is not None else None
+            ci_low_kpa = _finite_float(row.get("ci_low_kPa"))
+            ci_high_kpa = _finite_float(row.get("ci_high_kPa"))
+            ci_text = ""
+            if ci_low_kpa is not None and ci_high_kpa is not None:
+                ci_text = (
+                    "; 95% ДИ "
+                    f"{format_ru(ci_low_kpa / 1000.0, resolution=resolution_mpa)}–"
+                    f"{format_ru(ci_high_kpa / 1000.0, resolution=resolution_mpa, unit='МПа')}"
+                )
+            test_id = _modulus_text(row.get("test_id"), "не указан")
+            p_range_source = _modulus_text(row.get("p_range_source"), "не указан")
+            p_range_origin = _modulus_text(row.get("p_range_origin"), "не указан")
+            profile_source = _modulus_text(row.get("profile_source"), "не указан")
             lines.append(
-                f"- `{row['method']}`: E_stamp_app = "
-                f"{format_ru(row['E_stamp_app_kPa'] / 1000.0, resolution=0.01, unit='МПа')}; "
+                f"- `{test_id}` / `{row['method']}` / `{_modulus_profile(row)}`: "
+                f"**{result_class}**; review_status=`{review_status}`; "
+                "E_stamp_app = "
+                f"{format_ru(estimate_mpa, resolution=resolution_mpa, unit='МПа')}"
+                f"{ci_text}; "
                 f"p={format_ru(row['p_min_kPa'], resolution=0.1)}–{format_ru(row['p_max_kPa'], resolution=0.1)} кПа; "
-                f"n={int(row['n'])}; ν={format_ru(row['nu'], resolution=0.01)}; "
-                f"коэффициент формы={format_ru(row['shape_factor'], resolution=0.01)}."
+                f"источник диапазона=`{p_range_source}` (origin=`{p_range_origin}`); "
+                f"n={int(row['n'])}; ν={format_ru(row['nu'], resolution=0.01)} "
+                f"(source=`{_modulus_text(row.get('nu_source'), 'legacy')}`); "
+                f"коэффициент формы={format_ru(row['shape_factor'], resolution=0.01)} "
+                f"(source=`{_modulus_text(row.get('shape_factor_source'), 'legacy')}`); "
+                f"profile_source=`{profile_source}`; "
+                f"использованные строки={_modulus_used_rows(row.get('used_indices'))}."
             )
+            requested_min = _finite_float(row.get("requested_p_min_kPa"))
+            requested_max = _finite_float(row.get("requested_p_max_kPa"))
+            if requested_min is not None or requested_max is not None:
+                lines.append(
+                    "  - запрошенный диапазон: "
+                    f"{format_ru(requested_min, resolution=0.1)}–"
+                    f"{format_ru(requested_max, resolution=0.1, unit='кПа')}."
+                )
+            methodology_note = _modulus_text(row.get("methodology_note"), "не указано")
+            lines.append(f"  - методическое примечание: {methodology_note}")
     if plot_warnings:
         lines.extend(["", "## Предупреждения графика", ""])
         lines.extend(f"- {warning}" for warning in plot_warnings)

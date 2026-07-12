@@ -9,6 +9,7 @@ stopping at the first missing file.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import hashlib
 import io
@@ -37,7 +38,32 @@ REQUIRED_ARTIFACTS = (
 REQUIRED_CSV_COLUMNS = {
     "prepared.csv": {"test_id", "sequence_no", "settlement_mm", "F_kN", "p_kPa"},
     "failure_summary.csv": {"test_id", "failure_reached"},
-    "moduli.csv": {"test_id", "method", "E_stamp_app_kPa"},
+    "moduli.csv": {
+        "test_id",
+        "method",
+        "E_stamp_app_kPa",
+        "profile_id",
+        "profile_version",
+        "is_primary",
+        "review_status",
+        "p_range_source",
+        "nu_source",
+        "shape_factor_source",
+        "used_indices",
+        "methodology_note",
+    },
+}
+
+MODULUS_METHOD_COLUMNS = {
+    "profile_id",
+    "profile_version",
+    "is_primary",
+    "review_status",
+    "p_range_source",
+    "nu_source",
+    "shape_factor_source",
+    "used_indices",
+    "methodology_note",
 }
 
 ZIP_EXTERNAL_COPIES = {
@@ -76,7 +102,9 @@ def _read_bytes(path: Path, problems: list[str]) -> bytes | None:
     return payload
 
 
-def _check_csv(path: Path, required_columns: set[str], problems: list[str]) -> None:
+def _check_csv(
+    path: Path, required_columns: set[str], problems: list[str]
+) -> tuple[set[str], list[dict[str | None, str | list[str] | None]]] | None:
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream)
@@ -87,7 +115,7 @@ def _check_csv(path: Path, required_columns: set[str], problems: list[str]) -> N
             rows = list(reader)
     except (OSError, UnicodeError, csv.Error) as exc:
         problems.append(f"{path.name} is not a readable UTF-8 CSV: {exc}")
-        return
+        return None
 
     if not rows:
         problems.append(f"{path.name} has no data rows")
@@ -95,6 +123,95 @@ def _check_csv(path: Path, required_columns: set[str], problems: list[str]) -> N
         problems.append(f"{path.name} has no non-empty test_id")
     if any(None in row for row in rows):
         problems.append(f"{path.name} has rows wider than its header")
+    return columns, rows
+
+
+def _parse_csv_bool(value: object) -> bool | None:
+    normalized = str(value or "").strip().casefold()
+    if normalized in {"true", "1", "yes"}:
+        return True
+    if normalized in {"false", "0", "no"}:
+        return False
+    return None
+
+
+def _parse_used_indices(value: object) -> list[object] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            parsed = ast.literal_eval(text)
+        except (SyntaxError, ValueError):
+            return None
+    return parsed if isinstance(parsed, list) else None
+
+
+def _check_moduli_rows(
+    columns: set[str],
+    rows: list[dict[str | None, str | list[str] | None]],
+    problems: list[str],
+) -> None:
+    if not MODULUS_METHOD_COLUMNS.issubset(columns):
+        return
+    for row_number, row in enumerate(rows, start=2):
+        test_id = str(row.get("test_id") or "").strip() or "<empty>"
+        method = str(row.get("method") or "").strip() or "<empty>"
+        label = f"moduli.csv row {row_number} ({test_id}/{method})"
+        empty_fields = sorted(
+            name for name in MODULUS_METHOD_COLUMNS if not str(row.get(name) or "").strip()
+        )
+        if empty_fields:
+            problems.append(
+                f"{label} has empty methodology fields: {', '.join(empty_fields)}"
+            )
+
+        used_indices = _parse_used_indices(row.get("used_indices"))
+        if used_indices is None:
+            problems.append(f"{label} used_indices is not a list")
+        elif any(
+            isinstance(index, bool) or not isinstance(index, int) or index < 0
+            for index in used_indices
+        ):
+            problems.append(f"{label} used_indices must contain non-negative integers")
+
+        is_primary = _parse_csv_bool(row.get("is_primary"))
+        if is_primary is None:
+            problems.append(f"{label} has invalid is_primary boolean")
+            continue
+        if not is_primary:
+            continue
+
+        try:
+            e_value = float(str(row.get("E_stamp_app_kPa") or "").strip())
+        except ValueError:
+            e_value = float("nan")
+        if not math.isfinite(e_value) or e_value <= 0:
+            problems.append(f"{label} is primary without a finite positive E_stamp_app_kPa")
+
+        review_status = str(row.get("review_status") or "").strip().casefold()
+        if review_status != "approved":
+            problems.append(
+                f"{label} is primary but review_status is not approved"
+            )
+        profile_id = str(row.get("profile_id") or "").strip().casefold()
+        if "diagnostic" in profile_id or "unapproved" in profile_id:
+            problems.append(f"{label} is primary with an unapproved profile")
+        range_tokens = " ".join(
+            str(row.get(name) or "").strip().casefold()
+            for name in ("p_range_source", "p_range_origin")
+        )
+        diagnostic_range_markers = (
+            "diagnostic",
+            "full_curve",
+            "whole_curve",
+            "implicit",
+            "unapproved",
+        )
+        if any(marker in range_tokens for marker in diagnostic_range_markers):
+            problems.append(f"{label} is primary with a diagnostic pressure range")
 
 
 def _load_json(path: Path, problems: list[str]) -> object | None:
@@ -326,7 +443,10 @@ def verify_demo_artifacts(output_dir: str | Path) -> None:
     for name, required_columns in REQUIRED_CSV_COLUMNS.items():
         path = directory / name
         if path.is_file() and path.stat().st_size:
-            _check_csv(path, required_columns, problems)
+            csv_result = _check_csv(path, required_columns, problems)
+            if name == "moduli.csv" and csv_result is not None:
+                columns, rows = csv_result
+                _check_moduli_rows(columns, rows, problems)
     pcr_path = directory / "pcr.json"
     if pcr_path.is_file() and pcr_path.stat().st_size:
         _check_pcr(pcr_path, problems)
