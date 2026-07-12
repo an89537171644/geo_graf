@@ -14,7 +14,7 @@
 - Phase 03 local code head: `cc909901bf52c50a1214793caeb88beccd149618`
 - Phase 03 remote head: `148622d1c171dbd404ac5ef572cae6b13afb451d`
 - Phase 04 local code head: `420e5f02334a1b747e74c4cf6857ab308aceda7e`
-- Phase 04 remote head: pending built-in GitHub publication
+- Phase 04 remote code head: `47488d68d12179dac5b085229b0c2031a248b10c`
 
 ## Phase status
 
@@ -24,7 +24,7 @@
 | 01 E contract | COMPLETE | local `0474c80`; remote `74320b5` | 215 tests; core coverage 80.97%; CLI demo verified | [run 29184900474](https://github.com/an89537171644/geo_graf/actions/runs/29184900474): 6/6 matrix + Required CI SUCCESS; 6 artifacts | No primary E without an approved profile, confirmed in-range interval and valid positive calculation |
 | 02 Pairing | COMPLETE | local `3a8a545`; remote `62326f5` | 233 tests; core coverage 81.73%; CLI demo verified | [run 29186501814](https://github.com/an89537171644/geo_graf/actions/runs/29186501814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | `pair_id` is explicit; invalid, incomplete or ambiguous pairing falls back to independent analysis with a visible reason |
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
-| 04 Plots/censoring | LOCAL COMPLETE / REMOTE CI PENDING | local `420e5f0` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | pending | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
+| 04 Plots/censoring | COMPLETE | local `420e5f0`; remote `47488d6` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | [run 29191539241](https://github.com/an89537171644/geo_graf/actions/runs/29191539241): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
 | 05 Stretch | NOT STARTED | — | — | — | Not permitted before phases 0–4 |
 
 ## Numerical changes
