@@ -1,0 +1,4 @@
+test_id,stage,branch,load,settlement,status,group
+FAIL-NULL-01,1,loading,10.0,1.0,stable,failure
+FAIL-NULL-01,2,loading,20.0,2.0,stable,failure
+FAIL-NULL-01,3,loading,25.0,,failure,failure

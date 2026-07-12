@@ -1,0 +1,70 @@
+{
+  "project": "Synthetic one-zero-crossing acceptance case",
+  "schema_version": "0.4.1",
+  "load_kind": "force",
+  "load_unit": "kN",
+  "load_factor": 1.0,
+  "load_zero": 0.0,
+  "settlement_unit": "mm",
+  "stamp_shape": "custom",
+  "stamp_area_m2": 0.1,
+  "lever_ratio": 1.0,
+  "poisson_ratio": 0.3,
+  "shape_factor": 1.0,
+  "load_resolution_kN": 0.01,
+  "experiment_date": "2026-02-01",
+  "metrology_status": "confirmed",
+  "settlement_aggregation": "primary_channel",
+  "settlement_aggregation_channels": ["indicator_1"],
+  "settlement_primary_channel": "indicator_1",
+  "settlement_missing_channel_policy": "block",
+  "indicator_passports": {
+    "indicator_1": {
+      "instrument_id": "IND-ACC-ZERO-01",
+      "type": "synthetic dial indicator",
+      "serial_number": "SYN-ZERO-01",
+      "range_mm": 10.0,
+      "division_mm": 0.01,
+      "correction_factor": 1.0,
+      "verification_date": "2026-01-15",
+      "verification_valid_until": "2030-01-15",
+      "mode": "increasing_wrapped",
+      "initial_reading": 9.8,
+      "initial_turn": 0,
+      "zero_correction_mm": 0.0,
+      "max_increment_mm": 1.0,
+      "reverse_tolerance_mm": 0.02,
+      "travel_range_mm": 50.0,
+      "cumulative_sign": 1.0,
+      "x_mm": 0.0,
+      "y_mm": 0.0,
+      "assignment_status": "confirmed"
+    }
+  },
+  "project_passport": {
+    "project_id": "ACC-ZERO-01",
+    "series_name": "Synthetic zero crossing",
+    "reinforcement_status": "none",
+    "pair_id": "ACC-ZERO-PAIR",
+    "soil_batch": "SYNTH-SAND-01",
+    "experiment_date": "2026-02-01",
+    "operator": "synthetic-fixture",
+    "tray_dimensions_mm": [1200, 1200, 900],
+    "dry_density_kg_m3": 1650,
+    "moisture_percent": 8.0,
+    "soil_type": "synthetic fine sand",
+    "instruments": [
+      {
+        "instrument_id": "IND-ACC-ZERO-01",
+        "calibration_date": "2026-01-15"
+      }
+    ]
+  },
+  "tests": {
+    "ZERO-01": {
+      "group": "indicator",
+      "pair_id": "ACC-ZERO-PAIR",
+      "reinforcement": {"type": "none", "layers": 0}
+    }
+  }
+}

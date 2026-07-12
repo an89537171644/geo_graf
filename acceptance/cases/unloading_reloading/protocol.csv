@@ -1,0 +1,8 @@
+test_id,stage,branch,load,settlement,status,group
+CYCLE-01,0,loading,0.0,0.20,stable,cyclic
+CYCLE-01,1,loading,10.0,1.00,stable,cyclic
+CYCLE-01,2,loading,20.0,2.40,stable,cyclic
+CYCLE-01,3,unloading,10.0,1.90,stable,cyclic
+CYCLE-01,4,unloading,0.0,1.30,stable,cyclic
+CYCLE-01,5,reloading,10.0,1.80,stable,cyclic
+CYCLE-01,6,reloading,20.0,2.30,stable,cyclic

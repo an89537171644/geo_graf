@@ -1,0 +1,482 @@
+{
+  "contract_version": "acceptance-case/1.0",
+  "unsigned_engineering_gates": [
+    {"gate_id": "three_real_tests_engineer_signoff", "status": "unsigned", "required_evidence": "Three real laboratory cases, each independently reviewed and signed by the responsible engineer."},
+    {"gate_id": "antonov_methodology_bibliography_and_engineer_review", "status": "unsigned", "required_evidence": "Approved bibliography, applicability statement and engineering review of the Antonov methodology."},
+    {"gate_id": "real_indicator_passports_and_verification", "status": "unsigned", "required_evidence": "Channel-specific real indicator passports and verification validity at each experiment date."},
+    {"gate_id": "real_E_ranges_and_status", "status": "unsigned", "required_evidence": "Real pressure ranges for E with author, UTC timestamp, reason and explicit approval status."},
+    {"gate_id": "real_failure_censoring_review", "status": "unsigned", "required_evidence": "Engineer review of every real failure event, interval bound and right-censoring decision."},
+    {"gate_id": "real_pairing_and_publication_decisions", "status": "unsigned", "required_evidence": "Approved real pair identifiers and explicit publication-curve decisions for every group."},
+    {"gate_id": "manual_input_engineering_review", "status": "unsigned", "required_evidence": "Engineer-verified manual-entry workflow, audit trail and equivalence against the signed source protocol."},
+    {"gate_id": "licensing_owner_decision", "status": "unsigned", "required_evidence": "Repository owner decision on licensing and redistribution terms."},
+    {"gate_id": "windows_portable_not_in_rc", "status": "unsigned", "required_evidence": "Clean-machine Windows portable build and smoke test; the portable package is not part of the current release candidate."},
+    {"gate_id": "sqlite_project_archive_implementation_and_engineering_review", "status": "unsigned", "required_evidence": "TASK 13 SQLite project archive is not implemented in the current release candidate; implementation plus engineering review of migrations, immutable revisions, round-trip, backup and restore are required."}
+  ],
+  "cases": [
+    {
+      "case_id": "static_direct",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/static_direct/protocol.csv", "sha256": "ca5f364fa35fb7cc0f98d15c8d6b01a17ac650ddc34e4f52b1208c88b365db4b"},
+        "metadata": {"path": "cases/static_direct/metadata.json", "sha256": "8cc1b2a44fc6a0dff22e4f33e9f6d9fde78321dc54859053def94dedbb2658a3"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "ordinary static test with directly supplied settlement",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": [
+          "prepared.csv",
+          "failure_summary.csv",
+          "failure_analysis.json",
+          "validation_issues.csv",
+          "analysis_warnings.json",
+          "report.html",
+          "report.xlsx",
+          "artifact_manifest.json",
+          "approval_report.zip",
+          "reproducibility.zip"
+        ],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {
+            "selector": {"test_id": "STATIC-01"},
+            "expected": {
+              "failure_observed": false,
+              "censoring_type": "right_censored",
+              "lower_bound": 3.0,
+              "upper_bound": null
+            }
+          }
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "prepared.csv", "selector": {"test_id": "STATIC-01", "sequence_no": 3}, "field": "F_kN", "expected": 3.0, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "STATIC-01", "sequence_no": 3}, "field": "p_kPa", "expected": 30.0, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "STATIC-01", "sequence_no": 3}, "field": "settlement_mm", "expected": 0.45, "tolerance": "strict"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "STATIC-01", "row_index": 3}, "field": "aggregation_status", "expected": "not_applied_direct_settlement"}
+        ]
+      },
+      "tolerances": {
+        "strict": {"absolute": 1e-12, "relative": 1e-12}
+      },
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "A=0.1 m^2, so p_kPa=F_kN/A and the final point is 3/0.1=30 kPa; directly supplied settlement remains 0.45 mm without a hidden zero shift.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "zero_crossing",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/zero_crossing/protocol.csv", "sha256": "54b9a3d87f2f9611b4bc7bfcce045f0ef4f8f22e8ab5731c20799cfe07613e4d"},
+        "metadata": {"path": "cases/zero_crossing/metadata.json", "sha256": "f9c1e1cd990a2d023303e3f759353dafa95888d7f9b274eef64a4b843a3f4ec6"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "one uniquely resolvable zero crossing on an increasing wrapped dial",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": [
+          "prepared.csv",
+          "failure_summary.csv",
+          "failure_analysis.json",
+          "indicator_processing_audit.csv",
+          "indicator_processing_events.csv",
+          "indicator_aggregation_results.csv",
+          "report.html",
+          "report.xlsx",
+          "artifact_manifest.json",
+          "approval_report.zip",
+          "reproducibility.zip"
+        ],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "ZERO-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 2.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "ZERO-01", "channel": "indicator_1", "row_index": 1}, "field": "turn_number", "expected": 1},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "ZERO-01", "channel": "indicator_1", "row_index": 1}, "field": "computed_increment_mm", "expected": 0.4, "tolerance": "strict"},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "ZERO-01", "channel": "indicator_1", "row_index": 1}, "field": "warning", "expected": "zero_crossing"},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "ZERO-01", "channel": "indicator_1", "row_index": 2}, "field": "cumulative_settlement_mm", "expected": 0.9, "tolerance": "strict"},
+          {"artifact": "indicator_processing_events.csv", "selector": {"test_id": "ZERO-01", "channel": "indicator_1", "row_index": 1, "event_type": "zero_crossing"}, "field": "turn_after", "expected": 1}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "R=10 mm and initial raw=9.8 mm. Unwrapped readings are 9.8, 10.2, 10.7 mm, giving increments 0, 0.4, 0.5 mm and cumulative settlement 0, 0.4, 0.9 mm; the only turn transition is 0->1.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "multiple_turns",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/multiple_turns/protocol.csv", "sha256": "c37b1b77f439affccb05bb63bd79ce08049bf48b561e13a7deeff3262f01f595"},
+        "metadata": {"path": "cases/multiple_turns/metadata.json", "sha256": "48fb496aaabdd093a5a7a39dff962b2d6f1f7050823aacc195c6f4e1ede07d95"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "several full turns supplied by explicit integer counters",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "indicator_processing_audit.csv", "indicator_processing_events.csv", "indicator_aggregation_results.csv", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "TURNS-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 2.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 0}, "field": "turn_number", "expected": 0},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 1}, "field": "turn_number", "expected": 2},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 1}, "field": "computed_increment_mm", "expected": 20.2, "tolerance": "strict"},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 2}, "field": "turn_number", "expected": 3},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 2}, "field": "computed_increment_mm", "expected": 10.2, "tolerance": "strict"},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 2}, "field": "cumulative_settlement_mm", "expected": 30.4, "tolerance": "strict"},
+          {"artifact": "indicator_processing_events.csv", "selector": {"test_id": "TURNS-01", "channel": "indicator_1", "row_index": 2, "event_type": "zero_crossing"}, "field": "turn_after", "expected": 3}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "With R=10 mm, explicit turns 0,2,3 produce unwrapped readings 0,20.2,30.4 mm. Differences are 0,20.2,10.2 mm and the final cumulative value is 30.4 mm; no turn is inferred.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "failure_without_settlement",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/failure_without_settlement/protocol.csv", "sha256": "c4ee8a941eafba5662469a7d7b8bdcae604fc9d3ea55a5274bb86e7ce75cdb83"},
+        "metadata": {"path": "cases/failure_without_settlement/metadata.json", "sha256": "f5c4f704a2b2528c5f4b46b169438777a846b00fbea9e60303750d1da9fdb211"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "explicit failure event whose settlement could not be read",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "indicator_aggregation_results.csv", "validation_issues.csv", "analysis_warnings.json", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "FAIL-NULL-01"}, "expected": {"failure_observed": true, "censoring_type": "interval_censored", "lower_bound": 20.0, "upper_bound": 25.0}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "prepared.csv", "selector": {"test_id": "FAIL-NULL-01", "sequence_no": 2}, "field": "settlement_mm", "expected": null},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "FAIL-NULL-01"}, "field": "Fu_lower", "expected": 20.0, "tolerance": "strict"},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "FAIL-NULL-01"}, "field": "Fu_upper", "expected": 25.0, "tolerance": "strict"},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "FAIL-NULL-01"}, "field": "pu_lower", "expected": 200.0, "tolerance": "strict"},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "FAIL-NULL-01"}, "field": "pu_upper", "expected": 250.0, "tolerance": "strict"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "FAIL-NULL-01", "row_index": 2}, "field": "aggregation_status", "expected": "blocked_invalid_policy"}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["failure_without_settlement", "pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "The last stable force is 20 kN and the explicit failure step is 25 kN, so Fu is interval-censored as 20 < Fu <= 25 kN. A=0.1 m^2 gives 200 < pu <= 250 kPa. Failure settlement remains null.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "right_censored_fu",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/right_censored_fu/protocol.csv", "sha256": "f1816169dde597dea322ccefd59372c3599b30b5224bc6fab3157e6853d24b79"},
+        "metadata": {"path": "cases/right_censored_fu/metadata.json", "sha256": "d182cfeba744c2817b019bd9786194f56126a09980891bc5b912437045eab5df"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "maximum stable load reached without observed failure",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "validation_issues.csv", "analysis_warnings.json", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "RIGHT-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 30.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "RIGHT-01"}, "field": "Fu_lower", "expected": 30.0, "tolerance": "strict"},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "RIGHT-01"}, "field": "Fu_upper", "expected": null},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "RIGHT-01"}, "field": "pu_lower", "expected": 300.0, "tolerance": "strict"},
+          {"artifact": "failure_summary.csv", "selector": {"test_id": "RIGHT-01"}, "field": "pu_upper", "expected": null}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "No failure marker exists. The last stable force is 30 kN, so Fu > 30 kN and, with A=0.1 m^2, pu > 300 kPa. Neither upper bound nor midpoint estimate is permitted.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "unloading_reloading",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/unloading_reloading/protocol.csv", "sha256": "98ccdb51a63ebdf8e998e4689406d4fd91753947140bf1443fc1bfef9c19ac2e"},
+        "metadata": {"path": "cases/unloading_reloading/metadata.json", "sha256": "7611755bec0605eb9c66fd2af097eacb281c0d6c0df3774f97f46939563057b6"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "explicit loading, unloading and reloading branches",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "validation_issues.csv", "analysis_warnings.json", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "CYCLE-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 20.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 2}, "field": "branch", "expected": "loading"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 3}, "field": "branch", "expected": "unloading"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 4}, "field": "F_kN", "expected": 0.0, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 4}, "field": "settlement_mm", "expected": 1.3, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 5}, "field": "branch", "expected": "reloading"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "CYCLE-01", "sequence_no": 6}, "field": "settlement_mm", "expected": 2.3, "tolerance": "strict"}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "Protocol order is authoritative: stages 0-2 are loading, 3-4 unloading, and 5-6 reloading. The measured zero-load unloading settlement is 1.3 mm and is not extrapolated or reset.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "plane_center",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/plane_center/protocol.csv", "sha256": "4492fa2ddad9ac22822f159057fd99858899c7fcc0b1e3cecbdda2d32c56c07c"},
+        "metadata": {"path": "cases/plane_center/metadata.json", "sha256": "4e4fc52807cb0d5e3b1718b002128ea0ff9a0279c7c1c15b0c7bc40e2b6012e6"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "four calibrated indicators resolved by a rank-three plane-center fit",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "indicator_processing_audit.csv", "indicator_aggregation_results.csv", "indicator_calibration_parameters.csv", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "PLANE-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 1.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 0}, "field": "aggregation_status", "expected": "ok"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 0}, "field": "aggregated_settlement_mm", "expected": 2.0, "tolerance": "fit"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 0}, "field": "plane_rank", "expected": 3},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 0}, "field": "plane_residual_rms_mm", "expected": 0.0, "tolerance": "fit"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 0}, "field": "tilt_magnitude_mm_per_mm", "expected": 0.0223606797749979, "tolerance": "fit"},
+          {"artifact": "indicator_aggregation_results.csv", "selector": {"test_id": "PLANE-01", "row_index": 1}, "field": "aggregated_settlement_mm", "expected": 3.0, "tolerance": "fit"}
+        ]
+      },
+      "tolerances": {"fit": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "At stage 0 the readings satisfy z=2+0.01*x+0.02*y for positions (-100,0),(0,100),(100,0),(0,-100). Thus center z(0,0)=2 mm, rank=3, residual=0 and tilt magnitude=sqrt(0.01^2+0.02^2)=0.0223606797749979 mm/mm. Stage 1 adds exactly 1 mm to the plane.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "paired_groups",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/paired_groups/protocol.csv", "sha256": "de333b608b9fb8c07b3524a02a2a707b2198f48c2b138c6a455353c5427a69a9"},
+        "metadata": {"path": "cases/paired_groups/metadata.json", "sha256": "02c776597992ea92dcf822b3058fec15e1a5223a6ad75760efb2cd9e93dae34d"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "one explicit baseline-reinforced pair",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "group_comparison.csv", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "PAIR-B-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 3.0, "upper_bound": null}},
+          {"selector": {"test_id": "PAIR-R-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 3.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [],
+        "group_comparison": {
+          "baseline_group": "baseline",
+          "reinforced_group": "reinforced",
+          "bootstrap": 20,
+          "seed": 202604,
+          "artifact": "group_comparison.csv"
+        },
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "prepared.csv", "selector": {"test_id": "PAIR-B-01", "sequence_no": 3}, "field": "pair_id", "expected": "P-ACC-01"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "PAIR-R-01", "sequence_no": 3}, "field": "pair_id", "expected": "P-ACC-01"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "analysis_design", "expected": "paired"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "pairing_status", "expected": "paired_validated"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "n_pairs", "expected": 1},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "pair_ids_used", "expected": "P-ACC-01"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "k_s", "expected": 0.5, "tolerance": "strict"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "delta_s_mm", "expected": 0.5, "tolerance": "strict"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "settlement_reduction_percent", "expected": 50.0, "tolerance": "strict"},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "descriptive_small_n", "expected": true},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "permutation_p", "expected": null},
+          {"artifact": "group_comparison.csv", "selector": {"p_kPa": 30.0}, "field": "effect_size", "expected": null}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_not_calculated", "pcr", "E"],
+      "expected_review_status": {"failure": ["ok"]},
+      "independent_calculation_reference": "Both tests carry the same explicit pair_id P-ACC-01, so production compare_groups must select paired_validated design with n_pairs=1. At 30 kPa settlements are 1.0 and 0.5 mm, hence k_s=0.5, delta=0.5 mm and reduction=50 percent; small-n inferential fields remain non-asserted.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "equivalent_excel_manual",
+      "source_type": "equivalence",
+      "input_files": {
+        "manual_draft": {"path": "cases/equivalent_excel_manual/manual_draft.json", "sha256": "6badde056aed36635c7edf46c909d2a47c8857d07defb0a235f570190be5b858"},
+        "metadata": {"path": "cases/equivalent_excel_manual/metadata.json", "sha256": "481b04785e4832c3f302625c277f56395c011e685fd68c046e49453a578a7d50"},
+        "canonical_protocol": {"path": "cases/equivalent_excel_manual/equivalent_protocol.csv", "sha256": "6164c453ed57c9652d0cc3d36384476b4d5c2d308bc46c4f9065f3ab9d3a5a6a"},
+        "excel_projection": {"path": "cases/equivalent_excel_manual/excel_projection.json", "sha256": "88ab9a8796d248196c2ce9d7ba2c573f3fe55766526cb3684cac47ec79859d6e"},
+        "xlsx_materializer": {"path": "materialize_equivalent_xlsx.py", "sha256": "fff6f486aba98fe8b0f8df07c1c9ec940b159080b22058888d8b8125754d93e0"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "real strict XLSX import compared with the manual-draft adapter",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"],
+        "equivalence_columns": ["test_id", "F_kN", "p_kPa", "settlement_raw_mm", "settlement_mm", "D_mm", "stamp_area_m2"],
+        "equivalence_tolerance": "strict",
+        "xlsx_import_mode": "strict",
+        "binary_xlsx_required": true
+      },
+      "expected_outputs": {
+        "required_artifacts": ["materialized/equivalent_excel_manual.xlsx", "prepared.csv", "failure_summary.csv", "failure_analysis.json", "indicator_processing_audit.csv", "indicator_processing_events.csv", "indicator_aggregation_results.csv", "moduli.csv", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "EQ-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 2.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [
+          {"selector": {"test_id": "EQ-01", "method": "E_regression"}, "expected": {"profile_id": "diagnostic_unapproved_v1", "p_range_source": "diagnostic_full_curve", "review_status": "review_required", "is_primary": false}}
+        ],
+        "hashes": {"materialized/equivalent_excel_manual.xlsx": "c92d633b4e7a42034836a3e6609d19063f314494bff30a36c0be04bf75659e9f"},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "prepared.csv", "selector": {"test_id": "EQ-01", "sequence_no": 1}, "field": "F_kN", "expected": 1.0, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "EQ-01", "sequence_no": 1}, "field": "p_kPa", "expected": 14.14710605261292, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "EQ-01", "sequence_no": 1}, "field": "settlement_mm", "expected": 0.4, "tolerance": "strict"},
+          {"artifact": "prepared.csv", "selector": {"test_id": "EQ-01", "sequence_no": 2}, "field": "settlement_mm", "expected": 0.9, "tolerance": "strict"},
+          {"artifact": "indicator_processing_audit.csv", "selector": {"test_id": "EQ-01", "channel": "indicator_1", "row_index": 1}, "field": "turn_number", "expected": 1}
+        ]
+      },
+      "tolerances": {"strict": {"absolute": 1e-12, "relative": 1e-12}},
+      "expected_warnings": ["pcr_not_calculated", "modulus_review_required", "pcr", "E_methodology"],
+      "expected_review_status": {"failure": ["ok"], "moduli": ["review_required"]},
+      "independent_calculation_reference": "The acceptance materializer creates a real deterministic OOXML workbook; production read_protocol(strict) must process it. Its scientific columns are compared row-for-row with adapt_manual_draft. For R=10 mm, readings 9.8,0.2,0.7 resolve to settlements 0,0.4,0.9 mm. The CSV file is evidence only and cannot satisfy XLSX parity.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    },
+    {
+      "case_id": "unconfirmed_e",
+      "source_type": "csv",
+      "input_files": {
+        "protocol": {"path": "cases/unconfirmed_e/protocol.csv", "sha256": "b4fb41b74a699a9b0721913cba88eb3dad3f80d08239a1a6ae784fe5fd1311af"},
+        "metadata": {"path": "cases/unconfirmed_e/metadata.json", "sha256": "7ea5902002ef39a1d68bdbee5f345c3a2a263d810dde1ae91688c765fa21f257"}
+      },
+      "metadata": {
+        "data_class": "synthetic",
+        "scenario": "numerical conditional modulus with deliberately incomplete approval",
+        "cli_args": ["--plot-mode", "raw_protocol", "--bootstrap", "20", "--seed", "20260712"]
+      },
+      "expected_outputs": {
+        "required_artifacts": ["prepared.csv", "failure_summary.csv", "failure_analysis.json", "moduli.csv", "validation_issues.csv", "analysis_warnings.json", "report.html", "report.xlsx", "artifact_manifest.json", "approval_report.zip", "reproducibility.zip"],
+        "scientific_flags": [
+          {"artifact": "failure_analysis.json", "pointer": "/summary_method", "expected": "none"},
+          {"artifact": "failure_analysis.json", "pointer": "/point_estimate", "expected": null},
+          {"artifact": "artifact_manifest.json", "pointer": "/approval_status", "expected": "review_required"}
+        ],
+        "failure_rows": [
+          {"selector": {"test_id": "E-UNCONF-01"}, "expected": {"failure_observed": false, "censoring_type": "right_censored", "lower_bound": 100.0, "upper_bound": null}}
+        ],
+        "modulus_rows": [
+          {"selector": {"test_id": "E-UNCONF-01", "method": "E_regression"}, "expected": {"E_stamp_app_kPa": 54600.0, "profile_id": "antonov_round_stamp_v1", "profile_version": "1.0", "nu": 0.3, "shape_factor": 0.8, "p_range_source": "explicit", "review_status": "review_required", "is_primary": false}, "tolerance": "engineering"},
+          {"selector": {"test_id": "E-UNCONF-01", "method": "E_secant"}, "expected": {"E_stamp_app_kPa": 54600.0, "profile_id": "antonov_round_stamp_v1", "profile_version": "1.0", "nu": 0.3, "shape_factor": 0.8, "p_range_source": "explicit", "review_status": "review_required", "is_primary": false}, "tolerance": "engineering"}
+        ],
+        "hashes": {},
+        "report_package": true,
+        "golden_values": [
+          {"artifact": "moduli.csv", "selector": {"test_id": "E-UNCONF-01", "method": "E_regression"}, "field": "p_min_kPa", "expected": 25.0, "tolerance": "strict"},
+          {"artifact": "moduli.csv", "selector": {"test_id": "E-UNCONF-01", "method": "E_regression"}, "field": "p_max_kPa", "expected": 75.0, "tolerance": "strict"},
+          {"artifact": "moduli.csv", "selector": {"test_id": "E-UNCONF-01", "method": "E_regression"}, "field": "is_primary", "expected": false},
+          {"artifact": "moduli.csv", "selector": {"test_id": "E-UNCONF-01", "method": "E_regression"}, "field": "review_status", "expected": "review_required"}
+        ]
+      },
+      "tolerances": {
+        "strict": {"absolute": 1e-12, "relative": 1e-12},
+        "engineering": {"absolute": 1e-8, "relative": 1e-12}
+      },
+      "expected_warnings": ["pcr_not_calculated", "modulus_review_required", "pcr", "E_methodology"],
+      "expected_review_status": {"failure": ["ok"], "moduli": ["review_required"]},
+      "independent_calculation_reference": "Between 25 and 75 kPa, ds/dp=0.004 mm/kPa. E=(1-0.3^2)*0.8*0.300/(0.004/1000)=54600 kPa. Approval author, UTC time and reason are deliberately absent, so every modulus row remains review_required and is_primary=false.",
+      "reviewer": {"name": null, "organization": null, "reviewed_at": null},
+      "signoff_status": "unsigned"
+    }
+  ]
+}

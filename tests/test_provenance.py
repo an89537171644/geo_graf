@@ -43,7 +43,7 @@ def test_provenance_separates_input_metadata_and_config_hashes(tmp_path) -> None
     assert first.metadata_sha256 == second.metadata_sha256
     assert first.config_sha256 == second.config_sha256
     assert first.input_file_sha256 != first.metadata_sha256
-    assert first.program_version == "0.5.0b2.dev1"
+    assert first.program_version == "0.5.0rc1"
     assert "openpyxl" in first.dependency_versions
     assert "defusedxml" in first.dependency_versions
     assert first.source_tree_sha256 == second.source_tree_sha256

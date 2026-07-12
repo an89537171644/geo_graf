@@ -1,0 +1,24 @@
+{
+  "contract_version": "declarative-xlsx-projection/1.0",
+  "status": "declarative_only",
+  "binary_xlsx_claimed": false,
+  "sheet_name": "Protocol",
+  "header_row": 1,
+  "headers": [
+    "test_id",
+    "stage",
+    "load, kN",
+    "indicator_1",
+    "branch",
+    "status",
+    "comment",
+    "group"
+  ],
+  "rows": [
+    ["EQ-01", 0, 0.0, 9.8, "loading", "stable", "point 0", "baseline"],
+    ["EQ-01", 1, 1.0, 0.2, "loading", "stable", "point 1", "baseline"],
+    ["EQ-01", 2, 2.0, 0.7, "loading", "stable", "point 2", "baseline"]
+  ],
+  "canonical_projection": "equivalent_protocol.csv",
+  "scope_note": "The repository does not store a prebuilt binary for this case. Every acceptance run deterministically creates a real OOXML .xlsx and must pass it through the production strict XLSX importer before manual parity is evaluated. Clean-machine Microsoft Excel application or distribution acceptance is not claimed."
+}

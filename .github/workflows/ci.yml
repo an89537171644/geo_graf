@@ -62,7 +62,7 @@ jobs:
         run: python -m ruff check .
 
       - name: Compile Python 3.10-compatible sources
-        run: python -m compileall -q -f app.py soilstamp tests scripts
+        run: python -m compileall -q -f app.py soilstamp tests scripts acceptance
 
       - name: Full pytest (includes Streamlit AppTest and image regression)
         run: python -m pytest --junitxml="${{ env.CI_RESULTS }}/junit.xml"
@@ -76,6 +76,9 @@ jobs:
       - name: Verify demo artifacts and ZIP manifest
         run: python scripts/verify_demo_artifacts.py "${{ env.DEMO_OUT }}"
 
+      - name: Run release-candidate acceptance cases
+        run: soil-stamp acceptance-run acceptance/manifest.json --out acceptance/results
+
       - name: Confirm demo did not modify tracked files
         run: git diff --exit-code HEAD --
 
@@ -84,7 +87,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ci-${{ runner.os }}-py${{ matrix.python-version }}
-          path: ${{ env.CI_RESULTS }}
+          path: |
+            ${{ env.CI_RESULTS }}
+            acceptance/results
           if-no-files-found: warn
           retention-days: 30
 
