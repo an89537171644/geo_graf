@@ -3,10 +3,12 @@
 ## Repository
 
 - Base branch: `main`
-- Base SHA: `e0d303478c7e166b5a608bf90c0a351b4a26ec29` (актуальный `main` на старте TASK 06)
-- Working branch: `release/0.5.0rc1`
+- Base SHA / TASK 06 merge: `c0a8ef0ddec8bd98b94364179abf3cf8c897ab63`
+- Working branch: `release/0.5.0rc2-finalization`
 - Candidate version: `0.5.0rc1`
 - Release classification: **candidate for engineering acceptance**, not a final release
+- Final TASK 06 RC head: `8a946352cd69fd23c00122bbb5aff4071c65793a`
+- TASK 06 exact-head CI: [run 29199046654](https://github.com/an89537171644/geo_graf/actions/runs/29199046654) — 6/6 matrix jobs SUCCESS; `Required CI` SUCCESS
 - Phase 00 code head: `85ec0e06689629b250d60ee720a37dde1c4feabf`
 - Phase 01 local code head: `0474c80`
 - Phase 01 remote head: `74320b5d667f39bd551e3894dfb05aae446de095`
@@ -29,16 +31,18 @@
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
 | 04 Plots/censoring | COMPLETE | local `420e5f0`; remote `47488d6` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | [run 29191539241](https://github.com/an89537171644/geo_graf/actions/runs/29191539241): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
 | 05 Stretch / reporting A | COMPLETE | local `fee902c`; remote `34273e5` | 387 tests; core 130 tests / 84.57%; Ruff/compile/pip check PASS; CLI demo and hardened semantic verifier PASS | [run 29193972740](https://github.com/an89537171644/geo_graf/actions/runs/29193972740): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Deterministic HTML/XLSX approval package, exact source bytes, formula-safe cells, explicit review registry and self-contained `approval/` archive tree; SQLite Priority B not started |
+| 06 Release-candidate acceptance | COMPLETE / MERGED BY OWNER | RC `8a946352`; main merge `c0a8ef0` | 415 tests; core 130 tests / 84.57%; acceptance 10/10, 0 critical; engineering acceptance false | [run 29199046654](https://github.com/an89537171644/geo_graf/actions/runs/29199046654): 6/6 matrix jobs SUCCESS; Required CI SUCCESS; 6 artifacts | `0.5.0rc1` remains a candidate; three real cases and all engineering gates remain unsigned |
 
-Фазы 00–05 интегрированы в исходную точку TASK 06. Указанные commit SHA сохраняются
-как историческая трассировка веток разработки; актуальная объединённая точка — base
-SHA выше. Исторические implementation PR не являются текущим release-candidate PR
-и не используются как незавершённые gates TASK 06.
+Фазы 00–06 интегрированы в `main` владельцем. Указанные commit SHA сохраняются как
+историческая трассировка веток разработки; актуальная объединённая точка — merge
+SHA выше. Текущая finalization-ветка добавляет документацию и приёмочные инструкции,
+не меняет package version и должна пройти собственный exact-head CI до рассмотрения.
 
 ## TASK 06 release-candidate gate
 
-TASK 06 выполняется только в ветке `release/0.5.0rc1`; результаты предыдущих веток
-ниже не переиспользуются как доказательство. Фактический локальный прогон от
+TASK 06 выполнен в ветке `release/0.5.0rc1`; его финальный RC head
+`8a946352cd69fd23c00122bbb5aff4071c65793a` объединён владельцем в `main` merge
+`c0a8ef0ddec8bd98b94364179abf3cf8c897ab63`. Фактический локальный прогон от
 2026-07-12 на объединённом рабочем дереве TASK 06:
 
 - package metadata, runtime и provenance: `0.5.0rc1`; `pip check`: PASS;
@@ -63,10 +67,34 @@ SHA-256 локальных отчётов: JSON
 `22b518a12a36e4979bbd0b5289a201f56c93c82e18f64eaf056b3adbcfad1fdc`, HTML
 `ac23b834aa99802d2023eb3bd083c3465c0e3e37f968e48c1886051fa239ae1f`.
 
-GitHub matrix для точного remote release-candidate SHA должна быть зафиксирована в
-Draft PR после создания commit; до этого она намеренно не помечена здесь как PASS.
-Успешные synthetic cases подтверждают воспроизводимость framework, но не подписывают
-шаблоны реальных испытаний и не означают окончательный релиз.
+GitHub matrix для точного финального RC SHA подтверждена
+[run 29199046654](https://github.com/an89537171644/geo_graf/actions/runs/29199046654):
+Windows/Ubuntu × Python 3.10–3.12 — **6/6 matrix jobs SUCCESS**, `Required CI` —
+**SUCCESS**. Этот результат относится к TASK 06 head, а не заменяет exact-head CI
+текущего finalization PR. Успешные synthetic cases подтверждают воспроизводимость
+framework, но не подписывают шаблоны реальных испытаний и не означают окончательный
+релиз.
+
+## RC2 finalization documentation gate
+
+Имя ветки `release/0.5.0rc2-finalization` обозначает этап работы и не меняет package
+version `0.5.0rc1`. Локальный прогон от 2026-07-12 на finalization-дереве:
+
+- `pip check`, Ruff, `compileall app.py soilstamp tests scripts acceptance` и
+  `git diff --check`: PASS;
+- полный pytest: **420 passed**;
+- calculation core: **130 passed**, coverage **84.57%**;
+- CLI demo и semantic verifier: PASS; demo ZIP SHA-256
+  `4ea3595263907f078955a6481ba0a4d5e1f262880770c592e0241468b3adca75`;
+- acceptance-run: **10/10 PASS**, critical `0`,
+  `synthetic_acceptance_passed=true`, `engineering_acceptance=false`, все 10
+  engineering gates `unsigned`.
+
+Finalization-изменения ограничены readiness/acceptance/portable документацией и
+документационными regression-тестами. Научные формулы, расчётное ядро, графики
+Антонова, baseline images, examples, acceptance cases и исходные fixtures не
+изменялись. Exact-head GitHub Actions finalization-ветки должен быть зафиксирован в
+Draft PR после публикации commit; merge и final tag не разрешены этой записью.
 
 ## Numerical changes
 
@@ -159,13 +187,15 @@ with SHA-256 `2DAE243C6674C9E31673B757B78C1511065E5B8DD96D966BCB7716B13BCB849B`.
   manual representative decisions require a named author and reason.
 - Real channel assignments, instrument passports, coordinates and aggregation policy
   require engineering review; manual input also requires engineering acceptance.
-- SQLite archive, approved revisions, backup/restore and clean Windows distribution
-  are not implemented and require engineering review.
+- SQLite archive, approved revisions, migrations и backup/restore не реализованы и
+  не входят в текущую finalization-ветку.
+- Clean Windows portable distribution не реализован; подготовлено только отдельное
+  техническое задание `docs/windows_portable_distribution_spec.md`.
 - Methodology source title, author, year, page/section and source reference/hash for
   `antonov_round_stamp_v1` require engineering completion and review.
 - The project owner has not selected a software license; no `LICENSE` is present.
-- Release-candidate local and GitHub CI gates must be recorded for the exact TASK 06
-  head before a readiness decision.
+- Текущий finalization Draft PR должен пройти собственный GitHub CI exact head;
+  успешный TASK 06 run не переносится на новый commit.
 - Final release, tag, merge and distribution decisions remain with the owner and are
   outside TASK 06.
 

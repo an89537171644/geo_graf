@@ -52,6 +52,42 @@ review_status: review_required_for_release
   `acceptance_report.html` must record comparison of the E profile, range and
   scientific status for each applicable case.
 
+## Checklist методической трассируемости
+
+Пункты ниже заполняет ответственный инженер по проверяемому первоисточнику. Пустой
+checkbox означает незакрытый release gate. В этой finalization-ветке библиография
+не подбирается по догадке: `source_title`, `author`, `year`, `page_or_section` и
+`source_file_hash_or_reference` остаются `null`, а `reviewer` остаётся пустым.
+
+- [ ] `profile_id` и `profile_version` совпадают с runtime registry.
+- [ ] Текст формулы сопоставлен с `_FORMULA` в `soilstamp/methodology.py`; любые
+  различия записаны явно, а не исправлены скрыто.
+- [ ] `nu=0.30`, `shape_factor=0.80` и `stamp_shape=circle` совпадают с registry и
+  полями отчёта.
+- [ ] Область применимости и ограничения проверены для планируемых реальных
+  лабораторных испытаний.
+- [ ] `source_title` дословно перенесён из проверенного реального источника
+  (сейчас `null`; угадывать запрещено).
+- [ ] `author` проверен по источнику (сейчас `null`).
+- [ ] `year` проверен по источнику (сейчас `null`).
+- [ ] `page_or_section` указывает точный подтверждающий фрагмент (сейчас `null`).
+- [ ] `source_file_hash_or_reference` однозначно идентифицирует рассмотренную копию
+  или устойчивую библиографическую запись (сейчас `null`).
+- [ ] Именованный инженер подтвердил, что приведённый фрагмент действительно
+  обосновывает формулу, коэффициенты, геометрию, применимость и ограничения;
+  отклонения приложены к review evidence.
+- [ ] Подтверждена runtime-цепочка:
+  `soilstamp/methodology.py` → `moduli.csv` (`profile_id`, `profile_version`, `nu`,
+  `shape_factor`, диапазон, `is_primary`, `review_status`, `methodology_note`) →
+  report package.
+- [ ] На точном рассматриваемом SHA прошли перечисленные methodology/CLI tests и
+  semantic verifier.
+- [ ] Для каждого из трёх real cases сопоставлены круглый штамп, диапазон давления,
+  профиль, статус `E`, независимый расчёт и подписанное evidence.
+- [ ] Записаны reviewer, организация, UTC-дата и ссылка/хэш инженерной подписи.
+- [ ] `review_status` остаётся `review_required_for_release`, пока не выполнены все
+  библиографические и инженерные пункты; CI не меняет этот статус автоматически.
+
 `approved_for_conditional_calculation` in the runtime registry permits a conditional
 calculation only when its per-experiment gates are satisfied. It is not equivalent to
 `review_status: approved` for release. Until the missing source fields are completed
