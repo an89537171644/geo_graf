@@ -76,6 +76,12 @@ from soilstamp.provenance import (
     validate_project_metadata,
     value_sha256,
 )
+from soilstamp.report_package import (
+    build_approval_report_package,
+    build_formula_and_range_records,
+    build_review_required_registry,
+    collect_approval_artifacts,
+)
 from soilstamp.reporting import build_markdown_report, reproducibility_bundle
 from soilstamp.schema import VERSION, ValidationIssue
 
@@ -2261,6 +2267,115 @@ with tabs[6]:
                         ),
                     }
                 )
+            selected_failures = failures[failures["test_id"].isin(selected_tests)]
+            additional_review = []
+            if isinstance(manual_draft_payload, dict):
+                additional_review.append(
+                    {
+                        "message": (
+                            "Manual-entry source requires engineering verification before approval."
+                        )
+                    }
+                )
+            review_registry = build_review_required_registry(
+                passport_status=passport_completeness(metadata, selected_tests),
+                qc_issues=all_issues,
+                indicator_passports=selected_indicator_passports,
+                indicator_audit=selected_indicator_audit,
+                indicator_aggregation=selected_indicator_aggregation,
+                failures=selected_failures,
+                moduli=report_moduli,
+                group_comparisons=report_group_comparisons,
+                additional=additional_review,
+            )
+            conversion_parameters = pd.DataFrame(
+                effective_conversion_parameters(metadata, selected_tests)
+            )
+            pcr_report_values = {
+                key: value.to_dict() for key, value in pcr_by_test.items()
+            }
+            formula_records = build_formula_and_range_records(
+                conversion_parameters=conversion_parameters,
+                indicator_passports=selected_indicator_passports,
+                modulus_profiles=[
+                    get_modulus_profile(profile_id).to_dict()
+                    for profile_id in modulus_profile_ids()
+                ],
+                moduli=report_moduli,
+                pcr_results=pcr_report_values,
+            )
+            approval_artifacts = collect_approval_artifacts(
+                raw=raw,
+                prepared=report_prepared,
+                source_file_name=input_context["source_file_name"],
+                source_file_bytes=input_context["source_file_bytes"],
+                metadata_file_name=input_context["metadata_file_name"],
+                metadata_file_bytes=input_context["metadata_file_bytes"],
+                result_tables=result_tables,
+                figures=figure_payloads,
+                audit=st.session_state.audit,
+                provenance=processing_provenance,
+                report_markdown=report,
+                config_snapshot=processing_config,
+            )
+            approval_package = build_approval_report_package(
+                artifacts=approval_artifacts,
+                metadata=metadata,
+                raw=raw,
+                prepared=report_prepared,
+                indicator_passports=selected_indicator_passports,
+                indicator_audit=selected_indicator_audit,
+                qc_issues=[item.to_dict() for item in all_issues],
+                failures=selected_failures,
+                pcr_results=pcr_report_values,
+                moduli=report_moduli,
+                group_comparisons=report_group_comparisons,
+                audit=st.session_state.audit,
+                provenance=processing_provenance,
+                methodology={
+                    "modulus_method_profiles": [
+                        get_modulus_profile(profile_id).to_dict()
+                        for profile_id in modulus_profile_ids()
+                    ],
+                    "failure_analysis": failure_analysis,
+                    "publication_curve_selection_contract": (
+                        "publication-curve-selection/1.0"
+                    ),
+                },
+                formulas=formula_records,
+                display_rounding={"default": 6},
+                review_required=review_registry,
+                result_tables=result_tables,
+                title=f"Soil Stamp approval report — {metadata.get('project_id', 'project')}",
+                scope={
+                    "source_test_ids": raw["test_id"].dropna().astype(str).unique().tolist(),
+                    "selected_test_ids": sorted(selected_tests),
+                    "excluded_test_ids": sorted(
+                        set(raw["test_id"].dropna().astype(str)) - set(selected_tests)
+                    ),
+                    "source_rows": len(raw),
+                    "prepared_rows": len(report_prepared),
+                },
+            )
+            report_package_files = {
+                "report.html": approval_package.html,
+                "report.xlsx": approval_package.xlsx,
+                "artifact_manifest.json": approval_package.artifact_manifest_json,
+                "approval_report.zip": approval_package.archive,
+            }
+            embedded_report_files = {
+                **{
+                    f"approval/{relative_path}": payload
+                    for relative_path, payload in approval_artifacts.items()
+                },
+                **{
+                    f"approval/{name}": payload
+                    for name, payload in report_package_files.items()
+                },
+            }
+            st.session_state.setdefault("report_package_cache", {})[bundle_key] = (
+                report_package_files
+            )
             st.session_state.bundle_cache[bundle_key] = reproducibility_bundle(
                 raw=raw,
                 prepared=filtered,
@@ -2298,7 +2413,37 @@ with tabs[6]:
                     "source_rows": len(raw),
                     "prepared_rows": len(filtered),
                 },
+                additional_files=embedded_report_files,
             )
+    cached_report_package = st.session_state.get("report_package_cache", {}).get(
+        bundle_key
+    )
+    if cached_report_package:
+        report_downloads = st.columns(4)
+        report_downloads[0].download_button(
+            "Скачать HTML-отчёт",
+            cached_report_package["report.html"],
+            "soil_stamp_report.html",
+            "text/html",
+        )
+        report_downloads[1].download_button(
+            "Скачать XLSX-отчёт",
+            cached_report_package["report.xlsx"],
+            "soil_stamp_report.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        report_downloads[2].download_button(
+            "Скачать пакет согласования ZIP",
+            cached_report_package["approval_report.zip"],
+            "soil_stamp_approval_report.zip",
+            "application/zip",
+        )
+        report_downloads[3].download_button(
+            "Скачать SHA-256 manifest",
+            cached_report_package["artifact_manifest.json"],
+            "artifact_manifest.json",
+            "application/json",
+        )
     cached_bundle = st.session_state.bundle_cache.get(bundle_key)
     if cached_bundle:
         st.download_button(

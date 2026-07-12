@@ -6,6 +6,7 @@ from io import BytesIO
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from soilstamp.data import AuditTrail, failure_summary, prepare_measurements as _prepare_measurements
 from soilstamp.provenance import build_provenance, passport_completeness
@@ -229,6 +230,14 @@ def test_report_and_bundle_include_provenance_source_and_manifest() -> None:
         config_snapshot=config,
         result_tables={"../../escape": {"ok": True}},
         figures={"../bad.svg": b"<svg/>"},
+        additional_root_files={
+            "report.html": b"<html></html>",
+            "report.xlsx": b"PK-report",
+        },
+        additional_files={
+            "approval/report.html": b"<html>approval</html>",
+            "approval/source/protocol.csv": source,
+        },
     )
 
     assert provenance.input_file_sha256 in report
@@ -249,6 +258,10 @@ def test_report_and_bundle_include_provenance_source_and_manifest() -> None:
         assert all(".." not in name for name in names)
         assert "results/escape.json" in names
         assert "figures/bad.svg" in names
+        assert archive.read("report.html") == b"<html></html>"
+        assert archive.read("report.xlsx") == b"PK-report"
+        assert archive.read("approval/report.html") == b"<html>approval</html>"
+        assert archive.read("approval/source/protocol.csv") == source
         assert archive.read("source/protocol.csv") == source
         import hashlib
 
@@ -257,6 +270,23 @@ def test_report_and_bundle_include_provenance_source_and_manifest() -> None:
             == provenance.config_sha256
         )
         assert any(item["path"] == "source/protocol.csv" for item in manifest["files"])
+
+
+def test_reproducibility_bundle_rejects_unsafe_or_colliding_additional_paths() -> None:
+    kwargs = {
+        "raw": pd.DataFrame(),
+        "prepared": pd.DataFrame(),
+        "metadata": {},
+        "audit": AuditTrail(),
+        "report_markdown": "# Report",
+    }
+    with pytest.raises(ValueError, match="Unsafe reproducibility bundle path"):
+        reproducibility_bundle(**kwargs, additional_files={"../escape": b"x"})
+    with pytest.raises(ValueError, match="file/directory path collision"):
+        reproducibility_bundle(
+            **kwargs,
+            additional_files={"approval": b"file", "approval/report.html": b"html"},
+        )
 
 
 def test_report_summarizes_indicator_passport_crossings_and_qc() -> None:

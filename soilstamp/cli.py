@@ -44,6 +44,12 @@ from .provenance import (
     passport_completeness,
     validate_project_metadata,
 )
+from .report_package import (
+    build_approval_report_package,
+    build_formula_and_range_records,
+    build_review_required_registry,
+    collect_approval_artifacts,
+)
 from .reporting import build_markdown_report, reproducibility_bundle
 from .schema import ValidationIssue
 
@@ -542,32 +548,115 @@ def run(args: argparse.Namespace) -> Path:
     }
     for name, payload in figures.items():
         (args.out / name).write_bytes(payload)
+    validation_issue_records = [item.to_dict() for item in issues]
+    result_tables = {
+        "failure_summary": failures,
+        "failure_analysis": failure_analysis,
+        "curve_selections": pd.DataFrame(plot.selection_records),
+        "plotted_curve_points": plot.plotted_points,
+        "moduli": moduli,
+        "pcr": {key: value.to_dict() for key, value in pcr_results.items()},
+        "analysis_warnings": analysis_warnings,
+        "validation_issues": validation_issue_records,
+        "modulus_method_profiles": modulus_profile_definitions(),
+        "conversion_parameters": pd.DataFrame(
+            effective_conversion_parameters(
+                metadata,
+                prepared["test_id"].dropna().astype(str).unique().tolist(),
+            )
+        ),
+        "indicator_processing_audit": indicator_processing_audit,
+        "indicator_processing_events": indicator_processing_events,
+        "indicator_calibration_parameters": indicator_calibration_parameters,
+        "indicator_aggregation_results": indicator_aggregation_results,
+    }
+    report_artifacts = collect_approval_artifacts(
+        raw=raw,
+        prepared=prepared,
+        source_file_name=args.protocol.name,
+        source_file_bytes=protocol_bytes,
+        metadata_file_name=args.metadata.name,
+        metadata_file_bytes=metadata_bytes,
+        result_tables=result_tables,
+        figures=figures,
+        audit=audit,
+        provenance=provenance,
+        report_markdown=report,
+        config_snapshot=config_snapshot,
+    )
+    review_registry = build_review_required_registry(
+        passport_status=passport_completeness(metadata),
+        qc_issues=issues,
+        indicator_passports=indicator_calibration_parameters,
+        indicator_audit=indicator_processing_audit,
+        indicator_aggregation=indicator_aggregation_results,
+        failures=failures,
+        moduli=moduli,
+    )
+    formula_records = build_formula_and_range_records(
+        conversion_parameters=result_tables["conversion_parameters"],
+        indicator_passports=indicator_calibration_parameters,
+        modulus_profiles=modulus_profile_definitions(),
+        moduli=moduli,
+        pcr_results=result_tables["pcr"],
+    )
+    report_package = build_approval_report_package(
+        artifacts=report_artifacts,
+        metadata=metadata,
+        raw=raw,
+        prepared=prepared,
+        indicator_passports=indicator_calibration_parameters,
+        indicator_audit=indicator_processing_audit,
+        qc_issues=validation_issue_records,
+        failures=failures,
+        pcr_results={key: value.to_dict() for key, value in pcr_results.items()},
+        moduli=moduli,
+        audit=audit,
+        provenance=provenance,
+        methodology={
+            "modulus_method_profiles": modulus_profile_definitions(),
+            "failure_analysis": failure_analysis,
+            "publication_curve_selection_contract": "publication-curve-selection/1.0",
+        },
+        formulas=formula_records,
+        display_rounding={"default": 6},
+        review_required=review_registry,
+        result_tables=result_tables,
+        title=f"Soil Stamp approval report — {metadata.get('project_id', 'project')}",
+        scope={
+            "source_test_ids": raw["test_id"].dropna().astype(str).unique().tolist(),
+            "selected_test_ids": prepared["test_id"].dropna().astype(str).unique().tolist(),
+            "source_rows": len(raw),
+            "prepared_rows": len(prepared),
+        },
+    )
+    for relative_path, payload in report_artifacts.items():
+        artifact_path = args.out.joinpath(*relative_path.split("/"))
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_bytes(payload)
+    report_files = {
+        "report.html": report_package.html,
+        "report.xlsx": report_package.xlsx,
+        "artifact_manifest.json": report_package.artifact_manifest_json,
+        "approval_report.zip": report_package.archive,
+    }
+    embedded_report_files = {
+        **{
+            f"approval/{relative_path}": payload
+            for relative_path, payload in report_artifacts.items()
+        },
+        **{f"approval/{name}": payload for name, payload in report_files.items()},
+    }
+    for name, payload in report_files.items():
+        (args.out / name).write_bytes(payload)
+    (args.out / "audit.json").write_text(audit.to_json(), encoding="utf-8")
     bundle = reproducibility_bundle(
         raw=raw,
         prepared=prepared,
         metadata=metadata,
         audit=audit,
         report_markdown=report,
-        result_tables={
-            "failure_summary": failures,
-            "failure_analysis": failure_analysis,
-            "curve_selections": pd.DataFrame(plot.selection_records),
-            "plotted_curve_points": plot.plotted_points,
-            "moduli": moduli,
-            "pcr": {key: value.to_dict() for key, value in pcr_results.items()},
-            "analysis_warnings": analysis_warnings,
-            "modulus_method_profiles": modulus_profile_definitions(),
-            "conversion_parameters": pd.DataFrame(
-                effective_conversion_parameters(
-                    metadata,
-                    prepared["test_id"].dropna().astype(str).unique().tolist(),
-                )
-            ),
-            "indicator_processing_audit": indicator_processing_audit,
-            "indicator_processing_events": indicator_processing_events,
-            "indicator_calibration_parameters": indicator_calibration_parameters,
-            "indicator_aggregation_results": indicator_aggregation_results,
-        },
+        result_tables=result_tables,
         figures=figures,
         run_parameters=vars(args),
         provenance=provenance,
@@ -584,6 +673,7 @@ def run(args: argparse.Namespace) -> Path:
             "source_rows": len(raw),
             "prepared_rows": len(prepared),
         },
+        additional_files=embedded_report_files,
     )
     bundle_path = args.out / "reproducibility.zip"
     bundle_path.write_bytes(bundle)

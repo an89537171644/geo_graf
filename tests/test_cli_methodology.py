@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -159,6 +161,48 @@ def test_cli_approved_antonov_matches_direct_api_with_provenance(
     assert (output / "curve_selections.csv").is_file()
     assert (output / "plotted_curve_points.csv").is_file()
     assert (output / "failure_intervals.svg").is_file()
+    for report_name in (
+        "report.html",
+        "report.xlsx",
+        "artifact_manifest.json",
+        "approval_report.zip",
+        "audit.json",
+    ):
+        assert (output / report_name).is_file()
+    report_manifest = json.loads(
+        (output / "artifact_manifest.json").read_text(encoding="utf-8")
+    )
+    assert report_manifest["schema_version"] == "approval-report-package/1.0"
+    assert report_manifest["source_contract"]["authoritative_representation"] == (
+        "exact_source_bytes"
+    )
+    with zipfile.ZipFile(output / "approval_report.zip") as archive:
+        source_member = next(
+            path
+            for path in report_manifest["source_contract"]["paths"]
+            if path.startswith("source/protocol/")
+        )
+        assert archive.read(source_member) == protocol.read_bytes()
+        for record in report_manifest["files"]:
+            payload = archive.read(record["path"])
+            assert len(payload) == record["bytes"]
+            assert hashlib.sha256(payload).hexdigest() == record["sha256"]
+    with zipfile.ZipFile(bundle) as archive, zipfile.ZipFile(
+        output / "approval_report.zip"
+    ) as approval_archive:
+        for report_name in (
+            "report.html",
+            "report.xlsx",
+            "artifact_manifest.json",
+            "approval_report.zip",
+        ):
+            assert archive.read(f"approval/{report_name}") == (
+                output / report_name
+            ).read_bytes()
+        for record in report_manifest["files"]:
+            assert archive.read(f"approval/{record['path']}") == approval_archive.read(
+                record["path"]
+            )
     failure_analysis = json.loads(
         (output / "failure_analysis.json").read_text(encoding="utf-8")
     )

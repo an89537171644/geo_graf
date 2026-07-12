@@ -80,6 +80,28 @@ def test_streamlit_user_csv_path_has_no_exceptions() -> None:
     )
 
 
+def test_streamlit_builds_shared_html_xlsx_and_approval_downloads() -> None:
+    app = _user_upload_app(
+        "demo_protocol.csv",
+        (ROOT / "examples" / "demo_protocol.csv").read_bytes(),
+        "text/csv",
+    )
+    next(
+        item for item in app.button if item.label == "Собрать пакет воспроизводимости"
+    ).click()
+    app.run(timeout=180)
+
+    assert not app.exception
+    labels = {item.label for item in app.download_button}
+    assert {
+        "Скачать HTML-отчёт",
+        "Скачать XLSX-отчёт",
+        "Скачать пакет согласования ZIP",
+        "Скачать SHA-256 manifest",
+        "Скачать пакет воспроизводимости ZIP",
+    }.issubset(labels)
+
+
 def test_streamlit_singleton_subset_does_not_reuse_metadata_mean_decision() -> None:
     app = _user_upload_app(
         "demo_protocol.csv",

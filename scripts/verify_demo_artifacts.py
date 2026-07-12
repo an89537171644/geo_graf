@@ -12,6 +12,7 @@ import argparse
 import ast
 import csv
 import hashlib
+from html.parser import HTMLParser
 import io
 import json
 import math
@@ -21,6 +22,7 @@ import xml.etree.ElementTree as ElementTree
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Iterable
+from urllib.parse import unquote, urlsplit
 
 
 REQUIRED_ARTIFACTS = (
@@ -39,8 +41,88 @@ REQUIRED_ARTIFACTS = (
     "failure_intervals.svg",
     "failure_intervals.pdf",
     "failure_intervals_600dpi.png",
+    "report.html",
+    "report.xlsx",
+    "artifact_manifest.json",
+    "approval_report.zip",
     "reproducibility.zip",
 )
+
+REPORT_PACKAGE_VERSION = "approval-report-package/1.0"
+APPROVAL_SUBTREE_COPIES = {
+    "approval/report.html": "report.html",
+    "approval/report.xlsx": "report.xlsx",
+    "approval/artifact_manifest.json": "artifact_manifest.json",
+    "approval/approval_report.zip": "approval_report.zip",
+}
+HTML_SECTIONS = {
+    "project-passport",
+    "raw-data",
+    "prepared-data",
+    "indicator-passports",
+    "indicator-audit",
+    "qc-issues",
+    "failure-censoring",
+    "pcr",
+    "moduli",
+    "group-comparison",
+    "plots-index",
+    "audit-trail",
+    "provenance",
+    "methodology",
+}
+_REPORT_HTML_TAGS = {
+    "a",
+    "aside",
+    "body",
+    "code",
+    "div",
+    "h1",
+    "h2",
+    "h3",
+    "head",
+    "html",
+    "meta",
+    "p",
+    "section",
+    "span",
+    "strong",
+    "style",
+    "table",
+    "tbody",
+    "td",
+    "th",
+    "thead",
+    "title",
+    "tr",
+}
+XLSX_SHEETS = {
+    "Project passport",
+    "Raw data",
+    "Prepared data",
+    "Indicator passports",
+    "Indicator audit",
+    "QC issues",
+    "Failure censoring",
+    "pcr",
+    "Moduli",
+    "Group comparison",
+    "Plots index",
+    "Audit trail",
+    "Provenance",
+    "Methodology",
+}
+_OOXML_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_ALLOWED_MANIFEST_ROLES = {
+    "artifact",
+    "audit",
+    "figure",
+    "prepared_data",
+    "raw_view",
+    "report",
+    "result",
+    "source",
+}
 
 REQUIRED_CSV_COLUMNS = {
     "prepared.csv": {"test_id", "sequence_no", "settlement_mm", "F_kN", "p_kPa"},
@@ -521,6 +603,311 @@ def _check_png(path: Path, problems: list[str]) -> None:
         problems.append(f"{path.name} has invalid dimensions")
 
 
+def _safe_relative_reference(value: object) -> str | None:
+    """Return a decoded relative path, rejecting URL and filesystem escapes."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    reference = value.strip()
+    if "\\" in reference or any(ord(character) < 32 for character in reference):
+        return None
+    try:
+        parsed = urlsplit(reference)
+    except ValueError:
+        return None
+    if parsed.scheme or parsed.netloc or reference.startswith(("/", "//")):
+        return None
+    resolved = unquote(parsed.path)
+    decoded = parsed.path
+    for _ in range(6):
+        next_value = unquote(decoded)
+        decoded = next_value
+        if "\\" in decoded or any(ord(character) < 32 for character in decoded):
+            return None
+        security_path = PurePosixPath(decoded)
+        if security_path.is_absolute() or ".." in security_path.parts:
+            return None
+        if security_path.parts and ":" in security_path.parts[0]:
+            return None
+        if next_value == unquote(next_value):
+            break
+    else:
+        return None
+    if "\\" in resolved or any(ord(character) < 32 for character in resolved):
+        return None
+    path = PurePosixPath(resolved)
+    if path.is_absolute() or ".." in path.parts:
+        return None
+    if path.parts and ":" in path.parts[0]:
+        return None
+    if resolved in {"", "."}:
+        return ""
+    return path.as_posix()
+
+
+def _zip_ancestor_collisions(names: Iterable[str]) -> list[str]:
+    """Find portable file-vs-directory collisions such as ``a`` and ``a/b``."""
+
+    files: dict[str, str] = {}
+    directories: dict[str, str] = {}
+    for name in names:
+        normalized = name.rstrip("/")
+        if not normalized:
+            continue
+        target = directories if name.endswith("/") else files
+        target.setdefault(normalized.casefold(), normalized)
+
+    collisions: set[str] = set()
+    for portable_name, rendered in files.items():
+        if portable_name in directories:
+            collisions.add(f"{rendered} (file and directory)")
+        parts = PurePosixPath(rendered).parts
+        for end in range(1, len(parts)):
+            parent = PurePosixPath(*parts[:end]).as_posix()
+            ancestor = files.get(parent.casefold())
+            if ancestor is not None:
+                collisions.add(f"{ancestor} -> {rendered}")
+    return sorted(collisions)
+
+
+class _StandaloneReportParser(HTMLParser):
+    """Collect structural and active-content facts without third-party parsers."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.doctypes: list[str] = []
+        self.tags: dict[str, int] = {}
+        self.section_ids: list[str] = []
+        self.csp_values: list[str] = []
+        self.active_content: list[str] = []
+        self.references: list[str] = []
+
+    def handle_decl(self, decl: str) -> None:
+        self.doctypes.append(decl.strip().casefold())
+
+    def handle_startendtag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        normalized = tag.casefold()
+        self.tags[normalized] = self.tags.get(normalized, 0) + 1
+        values = {name.casefold(): value or "" for name, value in attrs}
+        if normalized == "section" and values.get("id"):
+            self.section_ids.append(values["id"])
+        if normalized == "meta" and values.get("http-equiv", "").casefold() == (
+            "content-security-policy"
+        ):
+            self.csp_values.append(values.get("content", ""))
+        if normalized in {"script", "iframe", "object", "embed", "base", "form"}:
+            self.active_content.append(f"<{normalized}>")
+        for name, value in values.items():
+            if name.startswith("on"):
+                self.active_content.append(f"{normalized}[{name}]")
+            if name in {"href", "src", "action", "formaction"}:
+                target = value.strip().casefold()
+                if target.startswith(("javascript:", "vbscript:", "http://", "https://", "//")):
+                    self.active_content.append(f"{normalized}[{name}={value!r}]")
+            if name == "href":
+                self.references.append(value)
+
+
+def _check_html_report(path: Path, problems: list[str]) -> list[str]:
+    try:
+        payload = path.read_bytes()
+        text = payload.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        problems.append(f"report.html is not standalone UTF-8 HTML: {exc}")
+        return []
+    if not text.strip():
+        problems.append("report.html is empty")
+        return []
+
+    parser = _StandaloneReportParser()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception as exc:  # HTMLParser can expose malformed declaration errors.
+        problems.append(f"report.html cannot be parsed: {exc}")
+        return []
+
+    if parser.doctypes != ["doctype html"]:
+        problems.append("report.html must contain one HTML5 doctype")
+    for tag in ("html", "head", "body"):
+        if parser.tags.get(tag) != 1:
+            problems.append(f"report.html must contain exactly one <{tag}> element")
+    section_counts = {
+        section_id: parser.section_ids.count(section_id) for section_id in HTML_SECTIONS
+    }
+    missing = sorted(section for section, count in section_counts.items() if count == 0)
+    duplicates = sorted(section for section, count in section_counts.items() if count > 1)
+    unexpected = sorted(set(parser.section_ids) - HTML_SECTIONS)
+    if missing:
+        problems.append("report.html is missing sections: " + ", ".join(missing))
+    if duplicates:
+        problems.append("report.html repeats sections: " + ", ".join(duplicates))
+    if unexpected:
+        problems.append("report.html has unexpected sections: " + ", ".join(unexpected))
+    if parser.active_content:
+        problems.append(
+            "report.html contains active or remote content: "
+            + ", ".join(sorted(set(parser.active_content)))
+        )
+    unexpected_tags = sorted(set(parser.tags) - _REPORT_HTML_TAGS)
+    if unexpected_tags:
+        problems.append(
+            "report.html contains unescaped or unsupported elements: "
+            + ", ".join(f"<{tag}>" for tag in unexpected_tags)
+        )
+    if not parser.csp_values or not any(
+        "default-src 'none'" in value.replace("&#39;", "'").casefold()
+        for value in parser.csp_values
+    ):
+        problems.append("report.html has no restrictive standalone Content-Security-Policy")
+    lowered = text.casefold()
+    if "no javascript or remote assets" not in lowered:
+        problems.append("report.html does not state its standalone no-JavaScript contract")
+    for reference in parser.references:
+        if _safe_relative_reference(reference) is None:
+            problems.append(f"report.html has an unsafe href: {reference!r}")
+    return parser.references
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _read_zip_xml(
+    archive: zipfile.ZipFile,
+    member: str,
+    label: str,
+    problems: list[str],
+) -> ElementTree.Element | None:
+    try:
+        return ElementTree.fromstring(archive.read(member))
+    except (KeyError, OSError, RuntimeError, ElementTree.ParseError) as exc:
+        problems.append(f"{label} has invalid or missing OOXML member {member}: {exc}")
+        return None
+
+
+def _check_xlsx_report(path: Path, problems: list[str]) -> None:
+    label = "report.xlsx"
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            name_set = set(names)
+            if len(names) != len(name_set):
+                problems.append(f"{label} contains duplicate member names")
+            unsafe = sorted(name for name in names if not _safe_zip_name(name))
+            if unsafe:
+                problems.append(f"{label} contains unsafe member names: " + ", ".join(unsafe))
+            if sum(info.file_size for info in infos) > 100 * 1024 * 1024:
+                problems.append(f"{label} expands beyond the 100 MiB safety limit")
+            corrupt = archive.testzip()
+            if corrupt is not None:
+                problems.append(f"{label} has a corrupt member: {corrupt}")
+            forbidden = sorted(
+                name
+                for name in names
+                if name.casefold().endswith(("vbaproject.bin", ".exe", ".dll"))
+                or name.casefold().startswith("xl/externallinks/")
+            )
+            if forbidden:
+                problems.append(f"{label} contains executable/external members: " + ", ".join(forbidden))
+
+            for relationship_member in sorted(
+                name for name in names if name.casefold().endswith(".rels")
+            ):
+                relationship_root = _read_zip_xml(
+                    archive, relationship_member, label, problems
+                )
+                if relationship_root is None:
+                    continue
+                for relationship in relationship_root:
+                    if _xml_local_name(relationship.tag) != "Relationship":
+                        continue
+                    relation_type = relationship.get("Type", "").casefold()
+                    if not relation_type.endswith("/hyperlink"):
+                        continue
+                    target = relationship.get("Target")
+                    if _safe_relative_reference(target) is None:
+                        problems.append(
+                            f"{label} has unsafe hyperlink target {target!r} "
+                            f"in {relationship_member}"
+                        )
+
+            required = {
+                "[Content_Types].xml",
+                "_rels/.rels",
+                "xl/workbook.xml",
+                "xl/_rels/workbook.xml.rels",
+            }
+            missing_members = sorted(required - name_set)
+            if missing_members:
+                problems.append(f"{label} is missing OOXML members: " + ", ".join(missing_members))
+                return
+
+            workbook = _read_zip_xml(archive, "xl/workbook.xml", label, problems)
+            relationships = _read_zip_xml(
+                archive, "xl/_rels/workbook.xml.rels", label, problems
+            )
+            if workbook is None or relationships is None:
+                return
+            relationship_targets = {
+                rel.get("Id", ""): rel.get("Target", "")
+                for rel in relationships
+                if _xml_local_name(rel.tag) == "Relationship"
+            }
+            sheet_names: list[str] = []
+            worksheet_members: list[str] = []
+            for element in workbook.iter():
+                if _xml_local_name(element.tag) != "sheet":
+                    continue
+                sheet_name = element.get("name", "")
+                sheet_names.append(sheet_name)
+                relationship_id = element.get(f"{{{_OOXML_REL_NS}}}id", "")
+                target = relationship_targets.get(relationship_id, "")
+                raw_target = PurePosixPath(target)
+                target_path = (
+                    PurePosixPath(*raw_target.parts[1:])
+                    if raw_target.is_absolute()
+                    else PurePosixPath("xl") / raw_target
+                )
+                normalized = target_path.as_posix()
+                if not target or not _safe_zip_name(normalized) or ".." in target_path.parts:
+                    problems.append(f"{label} sheet {sheet_name!r} has an unsafe relationship target")
+                    continue
+                if normalized not in name_set:
+                    problems.append(f"{label} sheet {sheet_name!r} references missing {normalized}")
+                    continue
+                worksheet_members.append(normalized)
+
+            if len(sheet_names) != len(set(sheet_names)):
+                problems.append(f"{label} contains duplicate worksheet names")
+            missing_sheets = sorted(XLSX_SHEETS - set(sheet_names))
+            unexpected_sheets = sorted(set(sheet_names) - XLSX_SHEETS)
+            if missing_sheets:
+                problems.append(f"{label} is missing logical sheets: " + ", ".join(missing_sheets))
+            if unexpected_sheets:
+                problems.append(f"{label} has unexpected logical sheets: " + ", ".join(unexpected_sheets))
+            if len(sheet_names) != len(XLSX_SHEETS):
+                problems.append(f"{label} must contain exactly 14 logical sheets")
+
+            for member in worksheet_members:
+                root = _read_zip_xml(archive, member, label, problems)
+                if root is not None and any(
+                    _xml_local_name(element.tag).casefold() == "f"
+                    for element in root.iter()
+                ):
+                    problems.append(f"{label} contains executable formula cells in {member}")
+    except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        problems.append(f"{label} is not a safe readable XLSX/ZIP archive: {exc}")
+
+
 def _safe_zip_name(name: str) -> bool:
     path = PurePosixPath(name)
     return not path.is_absolute() and ".." not in path.parts and "\\" not in name
@@ -563,7 +950,199 @@ def _same_artifact_payload(member: str, archived: bytes, external: bytes) -> boo
     return archived_text == external_text
 
 
-def _check_zip(path: Path, output_dir: Path, problems: list[str]) -> None:
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _check_approval_manifest(
+    path: Path, problems: list[str]
+) -> tuple[dict[str, object] | None, dict[str, dict[str, object]]]:
+    payload = _load_json(path, problems)
+    if not isinstance(payload, dict):
+        problems.append("artifact_manifest.json must contain an object")
+        return None, {}
+    if payload.get("schema_version") != REPORT_PACKAGE_VERSION:
+        problems.append("artifact_manifest.json has unsupported schema_version")
+    if payload.get("manifest_hash_exclusions") != ["artifact_manifest.json"]:
+        problems.append(
+            "artifact_manifest.json must explicitly exclude only itself from hashing"
+        )
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        problems.append("artifact_manifest.json has no non-empty files list")
+        return payload, {}
+
+    declared: dict[str, dict[str, object]] = {}
+    for index, entry in enumerate(files, start=1):
+        label = f"artifact_manifest.json files[{index}]"
+        if not isinstance(entry, dict):
+            problems.append(f"{label} is not an object")
+            continue
+        member = entry.get("path")
+        if not isinstance(member, str) or not _safe_zip_name(member) or not member:
+            problems.append(f"{label} has an unsafe or missing path")
+            continue
+        if member == "artifact_manifest.json":
+            problems.append("artifact_manifest.json incorrectly declares its own hash")
+        if member in declared:
+            problems.append(f"artifact_manifest.json declares {member} more than once")
+            continue
+        declared[member] = entry
+        byte_count = entry.get("bytes")
+        if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count < 0:
+            problems.append(f"{label} has an invalid byte count")
+        if not _valid_sha256(entry.get("sha256")):
+            problems.append(f"{label} has an invalid SHA-256")
+        href = entry.get("href")
+        if not isinstance(href, str) or not href.strip():
+            problems.append(f"{label} has no href")
+        else:
+            resolved_href = _safe_relative_reference(href)
+            if resolved_href is None:
+                problems.append(f"{label} has unsafe href {href!r}")
+            elif resolved_href != member:
+                problems.append(
+                    f"{label} href {href!r} does not resolve to {member!r}"
+                )
+        if not isinstance(entry.get("media_type"), str) or not str(
+            entry["media_type"]
+        ).strip():
+            problems.append(f"{label} has no media_type")
+        role = entry.get("role")
+        if role not in _ALLOWED_MANIFEST_ROLES:
+            problems.append(f"{label} has unsupported role {role!r}")
+
+    for report_name in ("report.html", "report.xlsx"):
+        entry = declared.get(report_name)
+        if entry is None:
+            problems.append(f"artifact_manifest.json does not declare {report_name}")
+        elif entry.get("role") != "report":
+            problems.append(f"artifact_manifest.json {report_name} role must be report")
+
+    source_entries = sorted(
+        member for member, entry in declared.items() if entry.get("role") == "source"
+    )
+    invalid_source_roles = sorted(
+        member
+        for member, entry in declared.items()
+        if (member.startswith("source/")) != (entry.get("role") == "source")
+    )
+    if invalid_source_roles:
+        problems.append(
+            "artifact_manifest.json has inconsistent source roles: "
+            + ", ".join(invalid_source_roles)
+        )
+    source_contract = payload.get("source_contract")
+    if not isinstance(source_contract, dict):
+        problems.append("artifact_manifest.json has no exact-source contract")
+    else:
+        if source_contract.get("authoritative_representation") != "exact_source_bytes":
+            problems.append(
+                "artifact_manifest.json source contract is not exact_source_bytes"
+            )
+        if source_contract.get("required") is not True:
+            problems.append("artifact_manifest.json exact source is not required")
+        if source_contract.get("raw_tables_are_views") is not True:
+            problems.append(
+                "artifact_manifest.json does not identify raw tables as views"
+            )
+        paths = source_contract.get("paths")
+        if paths != source_entries or not source_entries:
+            problems.append(
+                "artifact_manifest.json source contract paths do not match source roles"
+            )
+    return payload, declared
+
+
+def _check_approval_zip(
+    path: Path,
+    output_dir: Path,
+    manifest: dict[str, object] | None,
+    declared: dict[str, dict[str, object]],
+    html_references: Iterable[str],
+    problems: list[str],
+) -> None:
+    label = "approval_report.zip"
+    try:
+        with zipfile.ZipFile(path) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            name_set = set(names)
+            if len(names) != len(name_set):
+                problems.append(f"{label} contains duplicate member names")
+            collisions = _zip_ancestor_collisions(names)
+            if collisions:
+                problems.append(
+                    f"{label} contains file/directory ancestor collisions: "
+                    + ", ".join(collisions)
+                )
+            unsafe = sorted(name for name in names if not _safe_zip_name(name))
+            if unsafe:
+                problems.append(f"{label} contains unsafe member names: " + ", ".join(unsafe))
+            corrupt = archive.testzip()
+            if corrupt is not None:
+                problems.append(f"{label} has a corrupt member: {corrupt}")
+            if "artifact_manifest.json" not in name_set:
+                problems.append(f"{label} is missing artifact_manifest.json")
+            else:
+                internal_manifest = archive.read("artifact_manifest.json")
+                external_manifest_path = output_dir / "artifact_manifest.json"
+                if external_manifest_path.is_file() and internal_manifest != (
+                    external_manifest_path.read_bytes()
+                ):
+                    problems.append(
+                        f"{label} artifact_manifest.json differs from external copy"
+                    )
+
+            if manifest is not None:
+                expected = set(declared) | {"artifact_manifest.json"}
+                missing = sorted(expected - name_set)
+                extra = sorted(name_set - expected)
+                if missing:
+                    problems.append(f"{label} is missing declared members: " + ", ".join(missing))
+                if extra:
+                    problems.append(f"{label} contains undeclared members: " + ", ".join(extra))
+            for member in sorted(declared.keys() & name_set):
+                archived = archive.read(member)
+                entry = declared[member]
+                if entry.get("bytes") != len(archived):
+                    problems.append(f"{label} byte count mismatch for {member}")
+                if entry.get("sha256") != hashlib.sha256(archived).hexdigest():
+                    problems.append(f"{label} SHA-256 mismatch for {member}")
+                if entry.get("role") == "source" and not archived:
+                    problems.append(f"{label} exact source member {member} is empty")
+
+            for reference in html_references:
+                resolved = _safe_relative_reference(reference)
+                if resolved is None:
+                    continue
+                target = resolved or "report.html"
+                if target not in name_set:
+                    problems.append(
+                        f"{label} report.html href {reference!r} does not resolve"
+                    )
+
+            for report_name in ("report.html", "report.xlsx"):
+                if report_name not in name_set:
+                    continue
+                external_path = output_dir / report_name
+                if external_path.is_file() and archive.read(report_name) != external_path.read_bytes():
+                    problems.append(f"{label} member {report_name} differs from external copy")
+    except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
+        problems.append(f"{label} is not a safe readable ZIP archive: {exc}")
+
+
+def _check_zip(
+    path: Path,
+    output_dir: Path,
+    approval_declarations: dict[str, dict[str, object]],
+    html_references: Iterable[str],
+    problems: list[str],
+) -> None:
     try:
         with zipfile.ZipFile(path) as archive:
             infos = archive.infolist()
@@ -571,6 +1150,12 @@ def _check_zip(path: Path, output_dir: Path, problems: list[str]) -> None:
             name_set = set(names)
             if len(names) != len(name_set):
                 problems.append("reproducibility.zip contains duplicate member names")
+            collisions = _zip_ancestor_collisions(names)
+            if collisions:
+                problems.append(
+                    "reproducibility.zip contains file/directory ancestor collisions: "
+                    + ", ".join(collisions)
+                )
             unsafe = sorted(name for name in names if not _safe_zip_name(name))
             if unsafe:
                 problems.append(
@@ -580,12 +1165,15 @@ def _check_zip(path: Path, output_dir: Path, problems: list[str]) -> None:
             if corrupt is not None:
                 problems.append(f"reproducibility.zip has a corrupt member: {corrupt}")
 
-            required = set(ZIP_EXTERNAL_COPIES) | {
+            required = set(ZIP_EXTERNAL_COPIES) | set(APPROVAL_SUBTREE_COPIES) | {
                 "manifest.json",
                 "audit.json",
                 "provenance.json",
                 "analysis_run.json",
             }
+            required.update(
+                f"approval/{member}" for member in approval_declarations
+            )
             missing = sorted(required - name_set)
             if missing:
                 problems.append(
@@ -606,6 +1194,56 @@ def _check_zip(path: Path, output_dir: Path, problems: list[str]) -> None:
                 ):
                     problems.append(
                         f"reproducibility.zip member {member} differs from {external_name}"
+                    )
+            for member, external_name in APPROVAL_SUBTREE_COPIES.items():
+                if member not in name_set:
+                    continue
+                member_payload = archive.read(member)
+                external_path = output_dir / external_name
+                if external_path.is_file() and member_payload != external_path.read_bytes():
+                    problems.append(
+                        f"reproducibility.zip member {member} differs from exact external copy"
+                    )
+            approval_archive_payloads: dict[str, bytes] = {}
+            try:
+                with zipfile.ZipFile(output_dir / "approval_report.zip") as approval:
+                    approval_archive_payloads = {
+                        info.filename: approval.read(info)
+                        for info in approval.infolist()
+                        if not info.is_dir()
+                    }
+            except (OSError, zipfile.BadZipFile, RuntimeError):
+                pass
+            for artifact_path, entry in sorted(approval_declarations.items()):
+                member = f"approval/{artifact_path}"
+                if member not in name_set:
+                    continue
+                payload = archive.read(member)
+                if entry.get("bytes") != len(payload):
+                    problems.append(
+                        f"reproducibility.zip approval subtree byte count mismatch for "
+                        f"{artifact_path}"
+                    )
+                if entry.get("sha256") != hashlib.sha256(payload).hexdigest():
+                    problems.append(
+                        f"reproducibility.zip approval subtree SHA-256 mismatch for "
+                        f"{artifact_path}"
+                    )
+                approval_payload = approval_archive_payloads.get(artifact_path)
+                if approval_payload is not None and approval_payload != payload:
+                    problems.append(
+                        f"reproducibility.zip member {member} differs from approval_report.zip"
+                    )
+
+            for reference in html_references:
+                resolved = _safe_relative_reference(reference)
+                if resolved is None:
+                    continue
+                target = f"approval/{resolved or 'report.html'}"
+                if target not in name_set:
+                    problems.append(
+                        f"reproducibility.zip approval/report.html href "
+                        f"{reference!r} does not resolve in approval subtree"
                     )
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         problems.append(f"reproducibility.zip is not a readable ZIP archive: {exc}")
@@ -729,9 +1367,39 @@ def verify_demo_artifacts(output_dir: str | Path) -> None:
         path = directory / name
         if path.is_file() and path.stat().st_size:
             _check_png(path, problems)
+    html_path = directory / "report.html"
+    html_references: list[str] = []
+    if html_path.is_file() and html_path.stat().st_size:
+        html_references = _check_html_report(html_path, problems)
+    xlsx_path = directory / "report.xlsx"
+    if xlsx_path.is_file() and xlsx_path.stat().st_size:
+        _check_xlsx_report(xlsx_path, problems)
+    approval_manifest: dict[str, object] | None = None
+    approval_declarations: dict[str, dict[str, object]] = {}
+    approval_manifest_path = directory / "artifact_manifest.json"
+    if approval_manifest_path.is_file() and approval_manifest_path.stat().st_size:
+        approval_manifest, approval_declarations = _check_approval_manifest(
+            approval_manifest_path, problems
+        )
+    approval_zip_path = directory / "approval_report.zip"
+    if approval_zip_path.is_file() and approval_zip_path.stat().st_size:
+        _check_approval_zip(
+            approval_zip_path,
+            directory,
+            approval_manifest,
+            approval_declarations,
+            html_references,
+            problems,
+        )
     zip_path = directory / "reproducibility.zip"
     if zip_path.is_file() and zip_path.stat().st_size:
-        _check_zip(zip_path, directory, problems)
+        _check_zip(
+            zip_path,
+            directory,
+            approval_declarations,
+            html_references,
+            problems,
+        )
 
     if problems:
         raise ArtifactVerificationError(directory, problems)

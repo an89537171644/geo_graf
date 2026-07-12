@@ -8,9 +8,10 @@ import json
 import math
 import platform
 import sys
+import unicodedata
 import zipfile
 from decimal import Decimal, ROUND_HALF_UP
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import matplotlib
@@ -771,10 +772,13 @@ def reproducibility_bundle(
     metadata_file_bytes: bytes | None = None,
     config_snapshot: dict[str, Any] | None = None,
     scope: dict[str, Any] | None = None,
+    additional_root_files: dict[str, bytes] | None = None,
+    additional_files: dict[str, bytes] | None = None,
 ) -> bytes:
     buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(buffer, "w") as archive:
         manifest: list[dict[str, Any]] = []
+        written_paths: dict[str, str] = {}
 
         def safe_component(value: Any, fallback: str) -> str:
             basename = Path(str(value)).name
@@ -786,7 +790,26 @@ def reproducibility_bundle(
 
         def write(name: str, payload: bytes | str) -> None:
             content = payload.encode("utf-8") if isinstance(payload, str) else payload
-            archive.writestr(name, content)
+            portable_key = name.casefold()
+            if portable_key in written_paths:
+                raise ValueError(
+                    "Duplicate portable reproducibility path: "
+                    f"{written_paths[portable_key]!r} and {name!r}."
+                )
+            for existing_key, existing_name in written_paths.items():
+                if portable_key.startswith(existing_key + "/") or existing_key.startswith(
+                    portable_key + "/"
+                ):
+                    raise ValueError(
+                        "Reproducibility file/directory path collision: "
+                        f"{existing_name!r} and {name!r}."
+                    )
+            written_paths[portable_key] = name
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 3
+            info.external_attr = 0o100644 << 16
+            archive.writestr(info, content)
             manifest.append(
                 {"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
             )
@@ -808,6 +831,37 @@ def reproducibility_bundle(
         write("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2, default=str))
         write("audit.json", audit.to_json())
         write("report_ru.md", report_markdown.encode("utf-8"))
+        for name, payload in sorted((additional_root_files or {}).items()):
+            safe_name = safe_component(name, "report_artifact.bin")
+            if safe_name.casefold() in {
+                "manifest.json",
+                "metadata.json",
+                "audit.json",
+                "report_ru.md",
+            }:
+                raise ValueError(f"Reserved reproducibility bundle path: {safe_name}.")
+            write(safe_name, bytes(payload))
+        for raw_name, payload in sorted((additional_files or {}).items()):
+            original = unicodedata.normalize("NFC", str(raw_name))
+            if (
+                "\\" in original
+                or ":" in original
+                or any(
+                    unicodedata.category(character).startswith("C")
+                    for character in original
+                )
+            ):
+                raise ValueError(f"Unsafe reproducibility bundle path: {raw_name!r}.")
+            relative = PurePosixPath(original)
+            if (
+                not original
+                or relative.is_absolute()
+                or ".." in relative.parts
+                or any(part in {"", "."} for part in relative.parts)
+                or relative.parts[0].casefold() == "manifest.json"
+            ):
+                raise ValueError(f"Unsafe reproducibility bundle path: {raw_name!r}.")
+            write(relative.as_posix(), bytes(payload))
         if provenance:
             payload = provenance.to_dict() if hasattr(provenance, "to_dict") else dict(provenance)
             write("provenance.json", json.dumps(payload, ensure_ascii=False, indent=2, default=str))
@@ -838,7 +892,7 @@ def reproducibility_bundle(
         effective_result_tables.setdefault(
             "indicator_aggregation_results", indicator_aggregation
         )
-        for name, table in effective_result_tables.items():
+        for name, table in sorted(effective_result_tables.items(), key=lambda item: str(item[0])):
             safe_result_name = safe_component(name, "result")
             if hasattr(table, "to_csv"):
                 write(
@@ -850,10 +904,16 @@ def reproducibility_bundle(
                     f"results/{safe_result_name}.json",
                     json.dumps(table, ensure_ascii=False, indent=2, default=str),
                 )
-        for name, payload in (figures or {}).items():
+        for name, payload in sorted((figures or {}).items(), key=lambda item: str(item[0])):
             write(f"figures/{safe_component(name, 'figure.bin')}", payload)
+        manifest_info = zipfile.ZipInfo(
+            "manifest.json", date_time=(1980, 1, 1, 0, 0, 0)
+        )
+        manifest_info.compress_type = zipfile.ZIP_DEFLATED
+        manifest_info.create_system = 3
+        manifest_info.external_attr = 0o100644 << 16
         archive.writestr(
-            "manifest.json",
+            manifest_info,
             json.dumps(
                 {"scope": scope or {}, "files": manifest},
                 ensure_ascii=False,
