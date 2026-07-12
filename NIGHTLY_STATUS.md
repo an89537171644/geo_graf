@@ -16,7 +16,7 @@
 - Phase 04 local code head: `420e5f02334a1b747e74c4cf6857ab308aceda7e`
 - Phase 04 remote code head: `47488d68d12179dac5b085229b0c2031a248b10c`
 - Phase 05 local code head: `fee902cc082cb07e4a0ed1f1e6c93a0186a3ac7b`
-- Phase 05 remote code head: pending GitHub integration upload
+- Phase 05 remote code head: `34273e59da25ed009009401eaadde286d1112d62`
 
 ## Phase status
 
@@ -27,7 +27,7 @@
 | 02 Pairing | COMPLETE | local `3a8a545`; remote `62326f5` | 233 tests; core coverage 81.73%; CLI demo verified | [run 29186501814](https://github.com/an89537171644/geo_graf/actions/runs/29186501814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | `pair_id` is explicit; invalid, incomplete or ambiguous pairing falls back to independent analysis with a visible reason |
 | 03 Indicators/metrology | COMPLETE | local `cc90990`; remote `148622d` | 299 tests; core coverage 82.98%; CLI demo verified; indicator demo 11/11 rows | [run 29189319814](https://github.com/an89537171644/geo_graf/actions/runs/29189319814): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Per-channel passports, deterministic verification and an immutable aggregation basis; no scientific settlement while review is required |
 | 04 Plots/censoring | COMPLETE | local `420e5f0`; remote `47488d6` | 334 tests; core coverage 85.30%; Ruff/compile/pip check PASS; CLI demo and semantic verifier PASS | [run 29191539241](https://github.com/an89537171644/geo_graf/actions/runs/29191539241): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Explicit repeat selection; coordinate-aware support; individual failure intervals; no default point estimate |
-| 05 Stretch / reporting A | LOCAL COMPLETE / CI PENDING | local `fee902c`; remote pending | 387 tests; core 130 tests / 84.57%; Ruff/compile/pip check PASS; CLI demo and hardened semantic verifier PASS | Pending upload | Deterministic HTML/XLSX approval package, exact source bytes, formula-safe cells, explicit review registry and self-contained `approval/` archive tree; SQLite Priority B not started |
+| 05 Stretch / reporting A | COMPLETE | local `fee902c`; remote `34273e5` | 387 tests; core 130 tests / 84.57%; Ruff/compile/pip check PASS; CLI demo and hardened semantic verifier PASS | [run 29193972740](https://github.com/an89537171644/geo_graf/actions/runs/29193972740): 6/6 matrix + Required CI SUCCESS; 6 artifacts | Deterministic HTML/XLSX approval package, exact source bytes, formula-safe cells, explicit review registry and self-contained `approval/` archive tree; SQLite Priority B not started |
 
 ## Numerical changes
 
